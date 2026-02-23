@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 import os
 from collections.abc import AsyncGenerator
 import json
@@ -122,6 +123,96 @@ class MCPManager:
         return await client.call_tool(tool_name, tool_args)
 
 
+class Session:
+    def __init__(
+        self,
+        session_id: str,
+        session_key: str,
+        messages: list[dict],
+        session_jsonl_path: Path,
+        sessions_json_path: Path,
+    ):
+        self.session_id = session_id
+        self.session_key = session_key
+        self.messages = messages
+        self.session_jsonl_path = session_jsonl_path
+        self.sessions_json_path = sessions_json_path
+
+    @classmethod
+    def load(cls, sessions_dir: Path, session_key: str) -> "Session":
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        sessions_json_path = sessions_dir / "sessions.json"
+
+        # sessions.json を読む（なければ空dict）
+        if sessions_json_path.exists():
+            with open(sessions_json_path) as f:
+                sessions = json.load(f)
+        else:
+            sessions = {}
+
+        # session_key に対応する session_id を解決（なければ新規発行）
+        entry = sessions.get(session_key)
+        if entry is not None:
+            session_id = entry["sessionId"]
+        else:
+            session_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+            sessions[session_key] = {
+                "sessionId": session_id,
+                "updatedAt": datetime.now().isoformat(),
+            }
+            with open(sessions_json_path, "w") as f:
+                json.dump(sessions, f, indent=2)
+
+        # JSONL を読んで messages を復元（なければ空リスト）
+        session_jsonl_path = sessions_dir / f"{session_id}.jsonl"
+        messages = []
+        if session_jsonl_path.exists():
+            with open(session_jsonl_path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        messages.append(json.loads(line))
+
+        return cls(
+            session_id=session_id,
+            session_key=session_key,
+            messages=messages,
+            session_jsonl_path=session_jsonl_path,
+            sessions_json_path=sessions_json_path,
+        )
+
+    async def append_message(self, message: dict) -> None:
+        self.messages.append(message)
+        await asyncio.to_thread(self._write_message, message)
+
+    def _write_message(self, message: dict) -> None:
+        with open(self.session_jsonl_path, "a") as f:
+            f.write(json.dumps(message, ensure_ascii=False) + "\n")
+        self._update_sessions_json()
+
+    def reset(self) -> None:
+        self.session_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+        self.session_jsonl_path = (
+            self.session_jsonl_path.parent / f"{self.session_id}.jsonl"
+        )
+        self.messages = []
+        self._update_sessions_json()
+        # keep old session jsonl files
+
+    def _update_sessions_json(self) -> None:
+        if self.sessions_json_path.exists():
+            with open(self.sessions_json_path) as f:
+                sessions = json.load(f)
+        else:
+            sessions = {}
+        sessions[self.session_key] = {
+            "sessionId": self.session_id,
+            "updatedAt": datetime.now().isoformat(),
+        }
+        with open(self.sessions_json_path, "w") as f:
+            json.dump(sessions, f, indent=2)
+
+
 def build_agent_system_prompt(workspace_path: Path) -> str:
     # Tooling
     # Safety
@@ -139,9 +230,18 @@ def build_agent_system_prompt(workspace_path: Path) -> str:
     return "\n\n".join(bootstrap_prompts)
 
 
+def message_to_dict(message) -> dict:
+    if hasattr(message, "model_dump"):
+        return message.model_dump(exclude_none=True)
+    return message
+
+
 class CowakaClawAgent:
-    def __init__(self, model, workspace_path: str, mcp_config_json_path: str):
+    def __init__(
+        self, model, base_dir_path: str, workspace_path: str, mcp_config_json_path: str
+    ):
         self.model = model
+        self.base_dir_path = Path(base_dir_path)
         self.workspace_path = Path(workspace_path)
         self.mcp_config_json_path = mcp_config_json_path
 
@@ -157,31 +257,39 @@ class CowakaClawAgent:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         return await self.exit_stack.__aexit__(exc_type, exc_val, exc_tb)
 
+    async def chat_completions(self, messages, tools) -> dict:
+        agent_system_prompt = build_agent_system_prompt(
+            workspace_path=self.workspace_path
+        )
+        response = await self.openai_client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "system", "content": agent_system_prompt}] + messages,
+            tools=tools or None,
+        )
+        if response.choices[0].message.role != "assistant":
+            raise RuntimeError(f"{response.choices[0].message.role=} != assistant")
+        return message_to_dict(response.choices[0].message)
+
     async def agent_loop(self):
+        sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
+        session = Session.load(sessions_dir, "agent:main:cli:dm:local")
         tools = await self.mcp_manager.get_all_tools()
-        messages = []
         while True:
             user_message = await asyncio.to_thread(input, "> ")
-            messages.append({"role": "user", "content": user_message})
-            agent_system_prompt = build_agent_system_prompt(
-                workspace_path=self.workspace_path
-            )
-            response = await self.openai_client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "system", "content": agent_system_prompt}]
-                + messages,
-                tools=tools,
-            )
-            if response.choices[0].message.role != "assistant":
-                raise RuntimeError(f"{response.choices[0].message.role=} != assistant")
-            messages.append(response.choices[0].message)
-            if tool_calls := response.choices[0].message.tool_calls:
+            if user_message.strip() == "/new":
+                session.reset()
+                print("[session reset]")
+                continue
+            await session.append_message({"role": "user", "content": user_message})
+            assistant_message = await self.chat_completions(session.messages, tools)
+            await session.append_message(assistant_message)
+            if tool_calls := assistant_message.get("tool_calls"):
                 while tool_calls:
                     for tool_call in tool_calls:
                         try:
-                            tool_args = json.loads(tool_call.function.arguments)
+                            tool_args = json.loads(tool_call["function"]["arguments"])
                             tool_response = await self.mcp_manager.call_tool(
-                                tool_call.function.name, tool_args
+                                tool_call["function"]["name"], tool_args
                             )
                         except json.JSONDecodeError:
                             tool_response = (
@@ -189,33 +297,26 @@ class CowakaClawAgent:
                             )
                         except Exception as e:
                             tool_response = f"error: {type(e).__name__}: {e}"
-                        messages.append(
+                        await session.append_message(
                             {
                                 "role": "tool",
                                 "content": tool_response,
-                                "tool_call_id": tool_call.id,
-                            }
+                                "tool_call_id": tool_call["id"],
+                            },
                         )
                         print(tool_response)
-                    agent_system_prompt = build_agent_system_prompt(
-                        workspace_path=self.workspace_path
+                    assistant_message = await self.chat_completions(
+                        session.messages, tools
                     )
-                    response = await self.openai_client.chat.completions.create(
-                        model=self.model,
-                        messages=[{"role": "system", "content": agent_system_prompt}]
-                        + messages,
-                        tools=tools,
-                    )
-                    if response.choices[0].message.role != "assistant":
-                        raise RuntimeError(f"{response.choices[0].message.role=} != assistant")
-                    messages.append(response.choices[0].message)
-                    tool_calls = response.choices[0].message.tool_calls
-            print(response.choices[0].message.content)
+                    await session.append_message(assistant_message)
+                    tool_calls = assistant_message.get("tool_calls")
+            print(assistant_message.get("content") or "(no assistant message)")
 
 
 async def main():
     async with CowakaClawAgent(
         model="openai-gpt-oss-20b",
+        base_dir_path="./base_dir",
         workspace_path="./workspace",
         mcp_config_json_path="./mcp_config.json",
     ) as agent:
