@@ -5,8 +5,11 @@ from collections.abc import AsyncGenerator
 import json
 from pathlib import Path
 from contextlib import AsyncExitStack, asynccontextmanager
+from typing import Literal
 
 import openai
+from openai import pydantic_function_tool
+from pydantic import BaseModel, Field
 import mcp
 from mcp.client.stdio import stdio_client
 
@@ -236,6 +239,60 @@ def message_to_dict(message) -> dict:
     return message
 
 
+class MemoryUpdate(BaseModel):
+    """
+    Update MEMORY.md to persist important information across sessions.
+    Call this when:
+    - User shares personal facts, preferences, or goals
+    - A decision or conclusion is reached
+    - An ongoing project or task is established
+    - User corrects previously stored information (use mode='replace')
+    Do NOT call for temporary or session-specific information.
+    """
+    section: str = Field(..., description="Markdown heading to update (e.g. 'User Preferences')")
+    content: str = Field(..., description="Content to write under the section")
+    mode: Literal["append", "replace"] = Field("append", description="'append' or 'replace'")
+
+
+def call_memory_update(
+    workspace_path: Path,
+    section: str,
+    content: str,
+    mode: str = "append",
+) -> str:
+    memory_path = workspace_path / "MEMORY.md"
+    if memory_path.exists():
+        with open(memory_path) as f:
+            current = f.read()
+    else:
+        current = ""
+
+    heading = f"## {section}"
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    new_entry = f"{content}\n<!-- updated: {timestamp} -->"
+
+    if heading in current:
+        # セクションを見つけて処理
+        before, _, rest = current.partition(heading)
+        # 次のセクション（##）までを切り出す
+        parts = rest.split("\n## ", 1)
+        section_body = parts[0]
+        after = ("\n## " + parts[1]) if len(parts) > 1 else ""
+
+        if mode == "replace":
+            new_section = f"{heading}\n{new_entry}"
+        else:  # append
+            new_section = f"{heading}{section_body}\n{new_entry}"
+
+        updated = before + new_section + after
+    else:
+        # セクションが存在しない → 末尾に追加
+        updated = current.rstrip() + f"\n\n{heading}\n{new_entry}\n"
+
+    memory_path.write_text(updated, encoding="utf-8")
+    return f"MEMORY.md updated: section='{section}', mode={mode}"
+
+
 class CowakaClawAgent:
     def __init__(
         self, model, base_dir_path: str, workspace_path: str, mcp_config_json_path: str
@@ -257,6 +314,18 @@ class CowakaClawAgent:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         return await self.exit_stack.__aexit__(exc_type, exc_val, exc_tb)
 
+    async def get_all_tools(self) -> list[dict]:
+        native_tools = [pydantic_function_tool(MemoryUpdate)]
+        mcp_tools = await self.mcp_manager.get_all_tools()
+        return native_tools + mcp_tools
+
+    async def call_tool(self, name, args) -> str:
+        if name == MemoryUpdate.__name__:
+            tool_response = await asyncio.to_thread(call_memory_update, self.workspace_path, **args)
+        else:
+            tool_response = await self.mcp_manager.call_tool(name, args)
+        return tool_response
+
     async def chat_completions(self, messages, tools) -> dict:
         agent_system_prompt = build_agent_system_prompt(
             workspace_path=self.workspace_path
@@ -273,7 +342,7 @@ class CowakaClawAgent:
     async def agent_loop(self):
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
         session = Session.load(sessions_dir, "agent:main:cli:dm:local")
-        tools = await self.mcp_manager.get_all_tools()
+        tools = await self.get_all_tools()
         while True:
             user_message = await asyncio.to_thread(input, "> ")
             if user_message.strip() == "/new":
@@ -288,7 +357,7 @@ class CowakaClawAgent:
                     for tool_call in tool_calls:
                         try:
                             tool_args = json.loads(tool_call["function"]["arguments"])
-                            tool_response = await self.mcp_manager.call_tool(
+                            tool_response = await self.call_tool(
                                 tool_call["function"]["name"], tool_args
                             )
                         except json.JSONDecodeError:
