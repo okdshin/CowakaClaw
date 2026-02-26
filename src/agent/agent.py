@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
 
@@ -12,6 +13,27 @@ from ..memory.memory import MemoryUpdate, call_memory_update
 from ..session.session import Session
 from ..utils import message_to_dict, timestamp
 from .prompts import build_agent_system_prompt
+
+
+async def read_stdin_line(prompt: str) -> str:
+    """スレッドをブロックせずに stdin から1行読む。CancelledError に対応。"""
+    loop = asyncio.get_running_loop()
+    fut: asyncio.Future[str] = loop.create_future()
+
+    def on_readable() -> None:
+        loop.remove_reader(sys.stdin.fileno())
+        line = sys.stdin.readline()
+        if not fut.done():
+            fut.set_result(line.rstrip("\n"))
+
+    sys.stdout.write(prompt)
+    sys.stdout.flush()
+    loop.add_reader(sys.stdin.fileno(), on_readable)
+    try:
+        return await fut
+    except asyncio.CancelledError:
+        loop.remove_reader(sys.stdin.fileno())
+        raise
 
 
 class CowakaClawAgent:
@@ -73,7 +95,7 @@ class CowakaClawAgent:
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
         session = Session.load(sessions_dir, "agent:main:cli:dm:local")
         tools = await self.get_all_tools()
-        user_input_task = asyncio.create_task(asyncio.to_thread(input, "> "))
+        user_input_task = asyncio.create_task(read_stdin_line("> "))
         while True:
             announce_queue_task = asyncio.create_task(self.announce_queue.get())
 
@@ -97,10 +119,10 @@ class CowakaClawAgent:
             if user_message.strip() == "/new":
                 session.reset()
                 print("[session reset]")
-                user_input_task = asyncio.create_task(asyncio.to_thread(input, "> "))
+                user_input_task = asyncio.create_task(read_stdin_line("> "))
                 continue
             await self.assistant_turn(session, tools, user_message)
-            user_input_task = asyncio.create_task(asyncio.to_thread(input, "> "))
+            user_input_task = asyncio.create_task(read_stdin_line("> "))
 
     async def run_cron_job(self, job_id: str, message: str) -> None:
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
