@@ -1,0 +1,22 @@
+[project]
+name = "cowaka-claw"
+version = "0.1.0"
+description = "AI agent with MCP support, session management, and cron scheduling"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.0.0",
+    "pydantic>=2.0.0",
+    "mcp>=1.0.0",
+    "croniter>=2.0.0",
+]
+
+[project.scripts]
+cowaka-claw = "src.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
