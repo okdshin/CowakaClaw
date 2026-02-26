@@ -1,11 +1,12 @@
 import asyncio
+import os
 
 from .agent.agent import CowakaClawAgent
 
 
-async def main():
+async def async_main():
     async with CowakaClawAgent(
-        model="openai-gpt-oss-20b",
+        model=os.getenv("COWAKA_CLAW_OPENAI_MODEL"),
         base_dir_path="./base_dir",
         workspace_path="./workspace",
         mcp_config_json_path="./mcp_config.json",
@@ -13,5 +14,9 @@ async def main():
         await agent.run()
 
 
+def main():
+    asyncio.run(async_main())
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
