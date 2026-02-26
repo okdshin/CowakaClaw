@@ -7,7 +7,7 @@ from pathlib import Path
 import openai
 from openai import pydantic_function_tool
 
-from ..cron.manager import CronJobManager
+from ..cron.manager import AddCronJobAt, AddCronJobCron, AddCronJobEvery, CronJobManager, DeleteCronJob
 from ..mcp.manager import MCPManager
 from ..memory.memory import MemoryUpdate, call_memory_update
 from ..session.session import Session
@@ -61,13 +61,31 @@ class CowakaClawAgent:
         return await self.exit_stack.__aexit__(exc_type, exc_val, exc_tb)
 
     async def get_all_tools(self) -> list[dict]:
-        native_tools = [pydantic_function_tool(MemoryUpdate)]
+        native_tools = [
+            pydantic_function_tool(MemoryUpdate),
+            pydantic_function_tool(AddCronJobAt),
+            pydantic_function_tool(AddCronJobCron),
+            pydantic_function_tool(AddCronJobEvery),
+            pydantic_function_tool(DeleteCronJob),
+        ]
         mcp_tools = await self.mcp_manager.get_all_tools()
         return native_tools + mcp_tools
 
     async def call_tool(self, name, args) -> str:
         if name == MemoryUpdate.__name__:
             tool_response = await asyncio.to_thread(call_memory_update, self.workspace_path, **args)
+        elif name == AddCronJobAt.__name__:
+            job_id = self.cron_manager.add_cron_job("at", args["at"], args["message"], args["name"])
+            tool_response = f"Cron job created: job_id={job_id}"
+        elif name == AddCronJobCron.__name__:
+            job_id = self.cron_manager.add_cron_job("cron", args["expr"], args["message"], args["name"])
+            tool_response = f"Cron job created: job_id={job_id}"
+        elif name == AddCronJobEvery.__name__:
+            job_id = self.cron_manager.add_cron_job("every", str(args["interval_sec"]), args["message"], args["name"])
+            tool_response = f"Cron job created: job_id={job_id}"
+        elif name == DeleteCronJob.__name__:
+            self.cron_manager.delete_cron_job(args["job_id"])
+            tool_response = f"Cron job deleted: job_id={args['job_id']}"
         else:
             tool_response = await self.mcp_manager.call_tool(name, args)
         return tool_response
