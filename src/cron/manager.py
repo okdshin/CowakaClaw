@@ -35,7 +35,7 @@ class AddCronJobCron(BaseModel):
 
     name: str = Field(..., description="Display name for the job")
     message: str = Field(..., description="Message delivered to the agent when the job fires")
-    expr: str = Field(
+    cron_expr: str = Field(
         ...,
         description="Cron expression (minute hour day month weekday), e.g. '0 9 * * 1-5'.",
     )
