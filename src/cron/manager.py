@@ -25,6 +25,7 @@ class AddCronJobAt(BaseModel):
             "or relative duration like '20m', '2h', '30s'."
         ),
     )
+    channel_id: str | None = Field(None, description="Destination channel for the announcement. Defaults to the channel where this job was created.")
 
 
 class AddCronJobCron(BaseModel):
@@ -39,6 +40,7 @@ class AddCronJobCron(BaseModel):
         ...,
         description="Cron expression (minute hour day month weekday), e.g. '0 9 * * 1-5'.",
     )
+    channel_id: str | None = Field(None, description="Destination channel for the announcement. Defaults to the channel where this job was created.")
 
 
 class AddCronJobEvery(BaseModel):
@@ -54,6 +56,7 @@ class AddCronJobEvery(BaseModel):
         gt=0,
         description="Interval in seconds, e.g. 3600 for every hour.",
     )
+    channel_id: str | None = Field(None, description="Destination channel for the announcement. Defaults to the channel where this job was created.")
 
 
 class DeleteCronJob(BaseModel):
