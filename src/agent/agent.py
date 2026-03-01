@@ -3,6 +3,8 @@ import json
 import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
+from typing import Callable
+from dataclass import dataclass
 
 import openai
 from openai import pydantic_function_tool
@@ -11,8 +13,15 @@ from ..cron.manager import AddCronJobAt, AddCronJobCron, AddCronJobEvery, CronJo
 from ..mcp.manager import MCPManager
 from ..memory.memory import MemoryUpdate, call_memory_update
 from ..session.session import Session
+from ..tools.registry import ToolRegistry
 from ..utils import message_to_dict, timestamp
 from .prompts import build_agent_system_prompt
+
+
+@dataclass
+class Tool:
+    schema: str
+    handler: Callable
 
 
 async def read_stdin_line(prompt: str) -> str:
@@ -52,6 +61,7 @@ class CowakaClawAgent:
         self.announce_queue: asyncio.Queue[str] = asyncio.Queue()
 
     async def __aenter__(self):
+        self.core_tools = await self.build_core_tools()
         self.mcp_manager = await self.exit_stack.enter_async_context(
             MCPManager.load_from_config(self.mcp_config_json_path)
         )
@@ -60,35 +70,51 @@ class CowakaClawAgent:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         return await self.exit_stack.__aexit__(exc_type, exc_val, exc_tb)
 
-    async def get_all_tools(self) -> list[dict]:
-        native_tools = [
-            pydantic_function_tool(MemoryUpdate),
-            pydantic_function_tool(AddCronJobAt),
-            pydantic_function_tool(AddCronJobCron),
-            pydantic_function_tool(AddCronJobEvery),
-            pydantic_function_tool(DeleteCronJob),
-        ]
-        mcp_tools = await self.mcp_manager.get_all_tools()
-        return native_tools + mcp_tools
+    async def build_core_tools(self) -> dict[str, Tool]:
+        core_tools: dict[str, Tool] = {}
 
-    async def call_tool(self, name, args) -> str:
-        if name == MemoryUpdate.__name__:
-            tool_response = await asyncio.to_thread(call_memory_update, self.workspace_path, **args)
-        elif name == AddCronJobAt.__name__:
+        def register_tool(name, pydantic_model, handler):
+            core_tools[name] = Tool(
+                schema=pydantic_function_tool(pydantic_model, name=name),
+                handler=handler,
+            )
+
+        # Memory
+        async def handle_memory_update(args: dict) -> str:
+            return await asyncio.to_thread(call_memory_update, self.workspace_path, **args)
+        register_tool("memory_update", MemoryUpdate, handle_memory_update)
+
+        # Cron
+        async def handle_cron_job_add_at(args: dict) -> str:
             job_id = self.cron_manager.add_cron_job("at", args["at"], args["message"], args["name"])
-            tool_response = f"Cron job created: job_id={job_id}"
-        elif name == AddCronJobCron.__name__:
-            job_id = self.cron_manager.add_cron_job("cron", args["expr"], args["message"], args["name"])
-            tool_response = f"Cron job created: job_id={job_id}"
-        elif name == AddCronJobEvery.__name__:
+            return f"Cron job created: job_id={job_id}"
+        register_tool("cron_job_add_at", AddCronJobAt, handle_cron_job_add_at)
+
+        async def handle_cron_job_add_cron(args: dict) -> str:
+            job_id = self.cron_manager.add_cron_job("cron", args["cron_expr"], args["message"], args["name"])
+            return f"Cron job created: job_id={job_id}"
+        register_tool("cron_job_add_cron", AddCronJobCron, handle_cron_job_add_cron)
+
+        async def handle_cron_job_add_every(args: dict) -> str:
             job_id = self.cron_manager.add_cron_job("every", str(args["interval_sec"]), args["message"], args["name"])
-            tool_response = f"Cron job created: job_id={job_id}"
-        elif name == DeleteCronJob.__name__:
+            return f"Cron job created: job_id={job_id}"
+        register_tool("cron_job_add_every", AddCronJobEvery, handle_cron_job_add_every)
+
+        async def handle_cron_job_delete(args: dict) -> str:
             self.cron_manager.delete_cron_job(args["job_id"])
-            tool_response = f"Cron job deleted: job_id={args['job_id']}"
+            return f"Cron job deleted: job_id={args['job_id']}"
+        register_tool("cron_job_delete", DeleteCronJob, handle_cron_job_delete)
+
+        return core_tools
+
+    async def get_tools(self) -> list[dict]:
+        return [tool.schema for tool in self.core_tools] + self.mcp_manager.get_all_tools()
+
+    async def call_tool(self, tool_name: str, tool_args: dict) -> str:
+        if tool_name in self.core_tools:
+            return await self.core_tools[tool_name].handler(tool_args)
         else:
-            tool_response = await self.mcp_manager.call_tool(name, args)
-        return tool_response
+            return await self.mcp_manager.call_tool(tool_name, tool_args)
 
     async def chat_completions(self, messages, tools) -> dict:
         agent_system_prompt = build_agent_system_prompt(
@@ -112,7 +138,7 @@ class CowakaClawAgent:
     async def agent_loop(self) -> None:
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
         session = Session.load(sessions_dir, "agent:main:cli:dm:local")
-        tools = await self.get_all_tools()
+        tools = self.get_tools()
         user_input_task = asyncio.create_task(read_stdin_line("> "))
         while True:
             announce_queue_task = asyncio.create_task(self.announce_queue.get())
@@ -145,7 +171,7 @@ class CowakaClawAgent:
     async def run_cron_job(self, job_id: str, message: str) -> None:
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
         session = Session.load(sessions_dir, f"cron:{job_id}-{timestamp()}")
-        tools = await self.get_all_tools()
+        tools = self.get_tools()
         assistant_message = await self.assistant_turn(session, tools, message)
         await self.announce_queue.put(
             f"[cron:{job_id}] {assistant_message.get('content') or '(no assistant message)'}"
@@ -160,7 +186,7 @@ class CowakaClawAgent:
                 for tool_call in tool_calls:
                     try:
                         tool_args = json.loads(tool_call["function"]["arguments"])
-                        tool_response = await self.call_tool(
+                        tool_response = self.call_tool(
                             tool_call["function"]["name"], tool_args
                         )
                     except json.JSONDecodeError:
