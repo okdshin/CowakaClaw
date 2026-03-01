@@ -112,6 +112,7 @@ class CowakaClawAgent:
         await asyncio.gather(
             self.agent_loop(),
             self.cron_manager.scheduler_loop(self.run_cron_job),
+            self.ui.start(),
         )
 
     async def agent_loop(self) -> None:
@@ -147,11 +148,11 @@ class CowakaClawAgent:
             await self.assistant_turn(session, tools, message.content, message.channel_id)
             receive_task = asyncio.create_task(self.ui.receive())
 
-    async def run_cron_job(self, job_id: str, message: str, channel_id: str) -> None:
+    async def run_cron_job(self, job_id: str, message: str, channel_id: str | None) -> None:
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
         session = Session.load(sessions_dir, f"cron:{job_id}-{timestamp()}")
         tools = await self.get_tools()
-        assistant_message = await self.assistant_turn(session, tools, message, channel_id)
+        assistant_message = await self.assistant_turn(session, tools, message, channel_id or self.ui.default_channel_id)
         await self.announce_queue.put(
             (channel_id, f"[cron:{job_id}] {assistant_message.get('content') or '(no assistant message)'}")
         )

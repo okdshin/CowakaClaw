@@ -13,6 +13,9 @@ class UI(ABC):
     default_channel_id: str
     default_session_key: str
 
+    async def start(self) -> None:
+        """エージェント起動時に呼ばれる。必要に応じてオーバーライドする。"""
+
     @abstractmethod
     async def receive(self) -> IncomingMessage:
         """次のユーザーメッセージを待って返す"""
