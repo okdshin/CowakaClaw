@@ -1,6 +1,5 @@
 import asyncio
 import json
-import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Callable
@@ -13,6 +12,7 @@ from ..cron.manager import AddCronJobAt, AddCronJobCron, AddCronJobEvery, CronJo
 from ..mcp.manager import MCPManager
 from ..memory.memory import MemoryUpdate, call_memory_update
 from ..session.session import Session
+from ..ui.base import UI
 from ..utils import message_to_dict, timestamp
 from .prompts import build_agent_system_prompt
 
@@ -23,41 +23,21 @@ class Tool:
     handler: Callable
 
 
-async def read_stdin_line(prompt: str) -> str:
-    """スレッドをブロックせずに stdin から1行読む。CancelledError に対応。"""
-    loop = asyncio.get_running_loop()
-    fut: asyncio.Future[str] = loop.create_future()
-
-    def on_readable() -> None:
-        loop.remove_reader(sys.stdin.fileno())
-        line = sys.stdin.readline()
-        if not fut.done():
-            fut.set_result(line.rstrip("\n"))
-
-    sys.stdout.write(prompt)
-    sys.stdout.flush()
-    loop.add_reader(sys.stdin.fileno(), on_readable)
-    try:
-        return await fut
-    except asyncio.CancelledError:
-        loop.remove_reader(sys.stdin.fileno())
-        raise
-
-
 class CowakaClawAgent:
     def __init__(
-        self, model, base_dir_path: str, workspace_path: str, mcp_config_json_path: str
+        self, model, base_dir_path: str, workspace_path: str, mcp_config_json_path: str, ui: UI
     ):
         self.model = model
         self.base_dir_path = Path(base_dir_path)
         self.workspace_path = Path(workspace_path)
         self.mcp_config_json_path = mcp_config_json_path
+        self.ui = ui
 
         self.openai_client = openai.AsyncOpenAI()
         self.exit_stack = AsyncExitStack()
         self.cron_manager = CronJobManager(self.base_dir_path)
 
-        self.announce_queue: asyncio.Queue[str] = asyncio.Queue()
+        self.announce_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
 
     async def __aenter__(self):
         self.core_tools = await self.build_core_tools()
@@ -79,27 +59,27 @@ class CowakaClawAgent:
             )
 
         # Memory
-        async def handle_memory_update(args: dict) -> str:
+        async def handle_memory_update(args: dict, channel_id: str) -> str:
             return await asyncio.to_thread(call_memory_update, self.workspace_path, **args)
         register_tool("memory_update", MemoryUpdate, handle_memory_update)
 
         # Cron
-        async def handle_cron_job_add_at(args: dict) -> str:
-            job_id = self.cron_manager.add_cron_job("at", args["at"], args["message"], args["name"])
+        async def handle_cron_job_add_at(args: dict, channel_id: str) -> str:
+            job_id = self.cron_manager.add_cron_job("at", args["at"], args["message"], args["name"], channel_id)
             return f"Cron job created: job_id={job_id}"
         register_tool("cron_job_add_at", AddCronJobAt, handle_cron_job_add_at)
 
-        async def handle_cron_job_add_cron(args: dict) -> str:
-            job_id = self.cron_manager.add_cron_job("cron", args["cron_expr"], args["message"], args["name"])
+        async def handle_cron_job_add_cron(args: dict, channel_id: str) -> str:
+            job_id = self.cron_manager.add_cron_job("cron", args["cron_expr"], args["message"], args["name"], channel_id)
             return f"Cron job created: job_id={job_id}"
         register_tool("cron_job_add_cron", AddCronJobCron, handle_cron_job_add_cron)
 
-        async def handle_cron_job_add_every(args: dict) -> str:
-            job_id = self.cron_manager.add_cron_job("every", str(args["interval_sec"]), args["message"], args["name"])
+        async def handle_cron_job_add_every(args: dict, channel_id: str) -> str:
+            job_id = self.cron_manager.add_cron_job("every", str(args["interval_sec"]), args["message"], args["name"], channel_id)
             return f"Cron job created: job_id={job_id}"
         register_tool("cron_job_add_every", AddCronJobEvery, handle_cron_job_add_every)
 
-        async def handle_cron_job_delete(args: dict) -> str:
+        async def handle_cron_job_delete(args: dict, channel_id: str) -> str:
             self.cron_manager.delete_cron_job(args["job_id"])
             return f"Cron job deleted: job_id={args['job_id']}"
         register_tool("cron_job_delete", DeleteCronJob, handle_cron_job_delete)
@@ -109,9 +89,9 @@ class CowakaClawAgent:
     async def get_tools(self) -> list[dict]:
         return [tool.schema for tool in self.core_tools.values()] + await self.mcp_manager.get_all_tools()
 
-    async def call_tool(self, tool_name: str, tool_args: dict) -> str:
+    async def call_tool(self, tool_name: str, tool_args: dict, channel_id: str) -> str:
         if tool_name in self.core_tools:
-            return await self.core_tools[tool_name].handler(tool_args)
+            return await self.core_tools[tool_name].handler(tool_args, channel_id)
         else:
             return await self.mcp_manager.call_tool(tool_name, tool_args)
 
@@ -136,21 +116,21 @@ class CowakaClawAgent:
 
     async def agent_loop(self) -> None:
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
-        session = Session.load(sessions_dir, "agent:main:cli:dm:local")
+        session = Session.load(sessions_dir, self.ui.default_session_key)
         tools = await self.get_tools()
-        user_input_task = asyncio.create_task(read_stdin_line("> "))
+        receive_task = asyncio.create_task(self.ui.receive())
         while True:
             announce_queue_task = asyncio.create_task(self.announce_queue.get())
 
             done, pending = await asyncio.wait(
-                [user_input_task, announce_queue_task],
+                [receive_task, announce_queue_task],
                 return_when=asyncio.FIRST_COMPLETED
             )
 
             if announce_queue_task in done:
-                msg = announce_queue_task.result()
-                print(f"\n[📢 {msg}]\n")
-                # user_input_taskはそのまま使い回す
+                channel_id, msg = announce_queue_task.result()
+                await self.ui.send(channel_id, f"\n[📢 {msg}]\n")
+                # receive_taskはそのまま使い回す
                 continue
             # ユーザー入力が来た
             announce_queue_task.cancel()
@@ -158,25 +138,25 @@ class CowakaClawAgent:
                 await announce_queue_task
             except asyncio.CancelledError:
                 pass
-            user_message = user_input_task.result()
-            if user_message.strip() == "/new":
+            message = receive_task.result()
+            if message.content.strip() == "/new":
                 session.reset()
-                print("[session reset]")
-                user_input_task = asyncio.create_task(read_stdin_line("> "))
+                await self.ui.send(message.channel_id, "[session reset]")
+                receive_task = asyncio.create_task(self.ui.receive())
                 continue
-            await self.assistant_turn(session, tools, user_message)
-            user_input_task = asyncio.create_task(read_stdin_line("> "))
+            await self.assistant_turn(session, tools, message.content, message.channel_id)
+            receive_task = asyncio.create_task(self.ui.receive())
 
-    async def run_cron_job(self, job_id: str, message: str) -> None:
+    async def run_cron_job(self, job_id: str, message: str, channel_id: str) -> None:
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
         session = Session.load(sessions_dir, f"cron:{job_id}-{timestamp()}")
         tools = await self.get_tools()
-        assistant_message = await self.assistant_turn(session, tools, message)
+        assistant_message = await self.assistant_turn(session, tools, message, channel_id)
         await self.announce_queue.put(
-            f"[cron:{job_id}] {assistant_message.get('content') or '(no assistant message)'}"
+            (channel_id, f"[cron:{job_id}] {assistant_message.get('content') or '(no assistant message)'}")
         )
 
-    async def assistant_turn(self, session: Session, tools: list[dict], user_message: str) -> dict:
+    async def assistant_turn(self, session: Session, tools: list[dict], user_message: str, channel_id: str) -> dict:
         await session.append_message({"role": "user", "content": user_message})
         assistant_message = await self.chat_completions(session.messages, tools)
         await session.append_message(assistant_message)
@@ -186,7 +166,7 @@ class CowakaClawAgent:
                     try:
                         tool_args = json.loads(tool_call["function"]["arguments"])
                         tool_response = await self.call_tool(
-                            tool_call["function"]["name"], tool_args
+                            tool_call["function"]["name"], tool_args, channel_id
                         )
                     except json.JSONDecodeError:
                         tool_response = (
@@ -201,11 +181,11 @@ class CowakaClawAgent:
                             "tool_call_id": tool_call["id"],
                         },
                     )
-                    print(tool_response)
+                    await self.ui.send(channel_id, tool_response)
                 assistant_message = await self.chat_completions(
                     session.messages, tools
                 )
                 await session.append_message(assistant_message)
                 tool_calls = assistant_message.get("tool_calls")
-        print(assistant_message.get("content") or "(no assistant message)")
+        await self.ui.send(channel_id, assistant_message.get("content") or "(no assistant message)")
         return assistant_message

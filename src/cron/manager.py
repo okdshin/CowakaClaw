@@ -87,6 +87,7 @@ class CronJobManager:
         when: str,
         message: str,
         name: str = "",
+        channel_id: str = "",
     ) -> str:
         job_id = str(uuid.uuid4())
         jobs = self.load_jobs()
@@ -95,6 +96,7 @@ class CronJobManager:
             "type": job_type,
             "schedule": when,
             "message": message,
+            "channel_id": channel_id,
             "created_at": datetime.now().astimezone().isoformat(),
         }
         self.save_jobs(jobs)
@@ -184,7 +186,7 @@ class CronJobManager:
             if job is None:
                 continue  # 待機中に削除された
 
-            asyncio.create_task(run_fn(next_job_id, job["message"]))
+            asyncio.create_task(run_fn(next_job_id, job["message"], job.get("channel_id", "")))
 
             if job["type"] == "at":
                 self.delete_cron_job(next_job_id)
