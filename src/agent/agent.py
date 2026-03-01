@@ -4,7 +4,7 @@ import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Callable
-from dataclass import dataclass
+from dataclasses import dataclass
 
 import openai
 from openai import pydantic_function_tool
@@ -13,7 +13,6 @@ from ..cron.manager import AddCronJobAt, AddCronJobCron, AddCronJobEvery, CronJo
 from ..mcp.manager import MCPManager
 from ..memory.memory import MemoryUpdate, call_memory_update
 from ..session.session import Session
-from ..tools.registry import ToolRegistry
 from ..utils import message_to_dict, timestamp
 from .prompts import build_agent_system_prompt
 
@@ -108,7 +107,7 @@ class CowakaClawAgent:
         return core_tools
 
     async def get_tools(self) -> list[dict]:
-        return [tool.schema for tool in self.core_tools] + self.mcp_manager.get_all_tools()
+        return [tool.schema for tool in self.core_tools.values()] + await self.mcp_manager.get_all_tools()
 
     async def call_tool(self, tool_name: str, tool_args: dict) -> str:
         if tool_name in self.core_tools:
@@ -138,7 +137,7 @@ class CowakaClawAgent:
     async def agent_loop(self) -> None:
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
         session = Session.load(sessions_dir, "agent:main:cli:dm:local")
-        tools = self.get_tools()
+        tools = await self.get_tools()
         user_input_task = asyncio.create_task(read_stdin_line("> "))
         while True:
             announce_queue_task = asyncio.create_task(self.announce_queue.get())
@@ -171,7 +170,7 @@ class CowakaClawAgent:
     async def run_cron_job(self, job_id: str, message: str) -> None:
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
         session = Session.load(sessions_dir, f"cron:{job_id}-{timestamp()}")
-        tools = self.get_tools()
+        tools = await self.get_tools()
         assistant_message = await self.assistant_turn(session, tools, message)
         await self.announce_queue.put(
             f"[cron:{job_id}] {assistant_message.get('content') or '(no assistant message)'}"
@@ -186,7 +185,7 @@ class CowakaClawAgent:
                 for tool_call in tool_calls:
                     try:
                         tool_args = json.loads(tool_call["function"]["arguments"])
-                        tool_response = self.call_tool(
+                        tool_response = await self.call_tool(
                             tool_call["function"]["name"], tool_args
                         )
                     except json.JSONDecodeError:
