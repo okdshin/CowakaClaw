@@ -68,8 +68,7 @@ class CronJobManager:
     def __init__(self, base_dir_path: Path):
         self.base_dir_path = base_dir_path
         self.jobs_path = base_dir_path / "cron" / "jobs.json"
-        self.tasks: dict[str, asyncio.Task] = {}
-        self._run_fn = None  # set when scheduler_loop starts
+        self.wakeup = asyncio.Event()
 
     def load_jobs(self) -> dict:
         if self.jobs_path.exists():
@@ -96,125 +95,101 @@ class CronJobManager:
             "type": job_type,
             "schedule": when,
             "message": message,
-            "created_at": datetime.now().isoformat(),
+            "created_at": datetime.now().astimezone().isoformat(),
         }
         self.save_jobs(jobs)
-        # Immediately start the task if scheduler is already running
-        if self._run_fn is not None:
-            self.tasks[job_id] = asyncio.create_task(
-                self.job_task(job_id, job_type, when, message, self._run_fn)
-            )
+        self.wakeup.set()
         return job_id
 
     def delete_cron_job(self, job_id: str) -> None:
         jobs = self.load_jobs()
         jobs.pop(job_id, None)
         self.save_jobs(jobs)
-        if task := self.tasks.pop(job_id, None):
-            task.cancel()
+        self.wakeup.set()
 
     def list_jobs(self) -> list[dict]:
         jobs = self.load_jobs()
         return [{"job_id": k, **v} for k, v in jobs.items()]
 
-    async def scheduler_loop(self, run_cron_job_fn) -> None:
-        """全ジョブを監視し、未起動のジョブをタスクとして起動する"""
-        self._run_fn = run_cron_job_fn
-        while True:
-            jobs = self.load_jobs()
-            for job_id, job in jobs.items():
-                if job_id not in self.tasks or self.tasks[job_id].done():
-                    self.tasks[job_id] = asyncio.create_task(
-                        self.job_task(
-                            job_id,
-                            job["type"],
-                            job["schedule"],
-                            job["message"],
-                            run_cron_job_fn,
-                        )
-                    )
-            # 削除されたジョブのタスクをキャンセル
-            for job_id in list(self.tasks):
-                if job_id not in jobs:
-                    self.tasks.pop(job_id).cancel()
-            await asyncio.sleep(60)
+    @staticmethod
+    def next_run(job: dict) -> datetime | None:
+        """ジョブの次回発火時刻を返す。算出不能な場合は None。"""
+        job_type = job["type"]
+        schedule = job["schedule"]
+        created_at = datetime.fromisoformat(job["created_at"])
 
-    async def job_task(
-        self,
-        job_id: str,
-        job_type: Literal["at", "cron", "every"],
-        when: str,
-        message: str,
-        run_fn,
-    ) -> None:
-        try:
-            if job_type == "at":
-                await self.run_at(job_id, when, message, run_fn)
-            elif job_type == "cron":
-                await self.run_cron(job_id, when, message, run_fn)
-            elif job_type == "every":
-                await self.run_every(job_id, when, message, run_fn)
-            else:
-                print(f"[cron:{job_id}] unknown type: {job_type}")
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            print(f"[cron:{job_id}] error: {e}")
+        if job_type == "at":
+            if schedule[-1] in ("m", "h", "s") and schedule[:-1].isdigit():
+                return created_at + CronJobManager.parse_delta(schedule)
+            return datetime.fromisoformat(schedule).astimezone()
 
-    async def run_at(self, job_id: str, when: str, message: str, run_fn) -> None:
-        """単発: 絶対時刻 or 相対時間"""
-        if when[-1] in ("m", "h", "s") and when[:-1].isdigit():
-            run_at = self.parse_duration(when)
-        else:
-            run_at = datetime.fromisoformat(when)
-        wait_sec = (run_at - datetime.now()).total_seconds()
-        if wait_sec > 0:
-            print(f"[cron:{job_id}] at → {run_at.strftime('%Y-%m-%d %H:%M:%S')} ({wait_sec:.0f}s)")
-            await asyncio.sleep(wait_sec)
-            await run_fn(job_id, message)
-        self.delete_cron_job(job_id)
-
-    async def run_cron(self, job_id: str, when: str, message: str, run_fn) -> None:
-        """繰り返し: cron式"""
-        while True:
+        if job_type == "cron":
             now = datetime.now().astimezone()
-            next_run = croniter(when, now).get_next(datetime)
-            wait_sec = (next_run - now).total_seconds()
-            print(f"[cron:{job_id}] next → {next_run.strftime('%Y-%m-%d %H:%M')} ({wait_sec:.0f}s)")
-            await asyncio.sleep(wait_sec)
-            await run_fn(job_id, message)
+            return croniter(schedule, now).get_next(datetime)
 
-    async def run_every(self, job_id: str, when: str, message: str, run_fn) -> None:
-        """繰り返し: 固定インターバル（last_run_atを基準にドリフト防止）"""
-        interval_sec = int(when)
-        jobs = self.load_jobs()
-        last_run_at = jobs[job_id].get("last_run_at")
-        if last_run_at:
-            next_run = datetime.fromisoformat(last_run_at) + dt.timedelta(seconds=interval_sec)
-            wait_sec = max(0, (next_run - datetime.now()).total_seconds())
-        else:
-            wait_sec = interval_sec
+        if job_type == "every":
+            interval = dt.timedelta(seconds=int(schedule))
+            last_run_at = job.get("last_run_at")
+            if last_run_at:
+                return datetime.fromisoformat(last_run_at) + interval
+            return created_at + interval
 
-        while True:
-            print(f"[cron:{job_id}] every {interval_sec}s → next in {wait_sec:.0f}s")
-            await asyncio.sleep(wait_sec)
-            await run_fn(job_id, message)
-
-            jobs = self.load_jobs()
-            if job_id in jobs:
-                jobs[job_id]["last_run_at"] = datetime.now().astimezone().isoformat()
-                self.save_jobs(jobs)
-
-            wait_sec = interval_sec
+        return None
 
     @staticmethod
-    def parse_duration(s: str) -> datetime:
-        """'20m', '2h', '30s' → datetime"""
+    def parse_delta(s: str) -> dt.timedelta:
+        """'20m', '2h', '30s' → timedelta"""
         unit = s[-1]
         value = int(s[:-1])
-        delta = {
+        return {
             "m": dt.timedelta(minutes=value),
             "h": dt.timedelta(hours=value),
             "s": dt.timedelta(seconds=value),
         }[unit]
-        return datetime.now() + delta
+
+    async def scheduler_loop(self, run_fn) -> None:
+        while True:
+            self.wakeup.clear()
+            jobs = self.load_jobs()
+            now = datetime.now().astimezone()
+
+            # 次に発火するジョブを探す
+            next_job_id = None
+            next_time = None
+            for job_id, job in jobs.items():
+                t = self.next_run(job)
+                if t is None:
+                    continue
+                if t.tzinfo is None:
+                    t = t.astimezone()
+                if next_time is None or t < next_time:
+                    next_time = t
+                    next_job_id = job_id
+
+            if next_job_id is None:
+                await self.wakeup.wait()
+                continue
+
+            wait_sec = max(0.0, (next_time - now).total_seconds())
+            print(f"[cron:{next_job_id}] next → {next_time.strftime('%Y-%m-%d %H:%M:%S')} ({wait_sec:.0f}s)")
+
+            try:
+                await asyncio.wait_for(self.wakeup.wait(), timeout=wait_sec)
+                continue  # 早期wakeup（ジョブ追加/削除）→ 再計算
+            except asyncio.TimeoutError:
+                pass
+
+            # 発火
+            job = self.load_jobs().get(next_job_id)
+            if job is None:
+                continue  # 待機中に削除された
+
+            asyncio.create_task(run_fn(next_job_id, job["message"]))
+
+            if job["type"] == "at":
+                self.delete_cron_job(next_job_id)
+            elif job["type"] == "every":
+                jobs = self.load_jobs()
+                if next_job_id in jobs:
+                    jobs[next_job_id]["last_run_at"] = datetime.now().astimezone().isoformat()
+                    self.save_jobs(jobs)
