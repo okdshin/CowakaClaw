@@ -1,7 +1,14 @@
 import asyncio
 import json
+import threading
 from datetime import datetime
 from pathlib import Path
+
+# sessions.json への read-modify-write をアトミックにするロック。
+# _update_sessions_json は asyncio.to_thread 経由で複数スレッドから同時に呼ばれるため
+# threading.Lock が必要。load も asyncio スレッドから sessions.json を読み書きするため
+# 同じロックで保護する。
+sessions_json_lock = threading.Lock()
 
 
 class Session:
@@ -24,25 +31,26 @@ class Session:
         sessions_dir.mkdir(parents=True, exist_ok=True)
         sessions_json_path = sessions_dir / "sessions.json"
 
-        # sessions.json を読む（なければ空dict）
-        if sessions_json_path.exists():
-            with open(sessions_json_path) as f:
-                sessions = json.load(f)
-        else:
-            sessions = {}
+        with sessions_json_lock:
+            # sessions.json を読む（なければ空dict）
+            if sessions_json_path.exists():
+                with open(sessions_json_path) as f:
+                    sessions = json.load(f)
+            else:
+                sessions = {}
 
-        # session_key に対応する session_id を解決（なければ新規発行）
-        entry = sessions.get(session_key)
-        if entry is not None:
-            session_id = entry["sessionId"]
-        else:
-            session_id = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
-            sessions[session_key] = {
-                "sessionId": session_id,
-                "updatedAt": datetime.now().astimezone().isoformat(),
-            }
-            with open(sessions_json_path, "w") as f:
-                json.dump(sessions, f, indent=2)
+            # session_key に対応する session_id を解決（なければ新規発行）
+            entry = sessions.get(session_key)
+            if entry is not None:
+                session_id = entry["sessionId"]
+            else:
+                session_id = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+                sessions[session_key] = {
+                    "sessionId": session_id,
+                    "updatedAt": datetime.now().astimezone().isoformat(),
+                }
+                with open(sessions_json_path, "w") as f:
+                    json.dump(sessions, f, indent=2)
 
         # JSONL を読んで messages を復元（なければ空リスト）
         session_jsonl_path = sessions_dir / f"{session_id}.jsonl"
@@ -81,14 +89,15 @@ class Session:
         # keep old session jsonl files
 
     def _update_sessions_json(self) -> None:
-        if self.sessions_json_path.exists():
-            with open(self.sessions_json_path) as f:
-                sessions = json.load(f)
-        else:
-            sessions = {}
-        sessions[self.session_key] = {
-            "sessionId": self.session_id,
-            "updatedAt": datetime.now().isoformat(),
-        }
-        with open(self.sessions_json_path, "w") as f:
-            json.dump(sessions, f, indent=2)
+        with sessions_json_lock:
+            if self.sessions_json_path.exists():
+                with open(self.sessions_json_path) as f:
+                    sessions = json.load(f)
+            else:
+                sessions = {}
+            sessions[self.session_key] = {
+                "sessionId": self.session_id,
+                "updatedAt": datetime.now().isoformat(),
+            }
+            with open(self.sessions_json_path, "w") as f:
+                json.dump(sessions, f, indent=2)

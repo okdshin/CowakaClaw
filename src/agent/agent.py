@@ -1,5 +1,6 @@
 import asyncio
 import json
+import weakref
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Callable
@@ -12,7 +13,7 @@ from ..cron.manager import AddCronJobAt, AddCronJobCron, AddCronJobEvery, CronJo
 from ..mcp.manager import MCPManager
 from ..memory.memory import MemoryUpdate, call_memory_update
 from ..session.session import Session
-from ..ui.base import UI
+from ..ui.base import IncomingMessage, UI
 from ..utils import message_to_dict, timestamp
 from .prompts import build_agent_system_prompt
 
@@ -38,6 +39,12 @@ class CowakaClawAgent:
         self.cron_manager = CronJobManager(self.base_dir_path)
 
         self.announce_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+
+        # session_key → asyncio.Lock の弱参照辞書。
+        # 値は弱参照で保持されるため、どのタスクも参照しなくなった時点でGCされ
+        # エントリが自動消滅する。ロックが生きている間は、それを取得・待機している
+        # タスクのローカル変数が強参照を持つことで存続する。
+        self.session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
     async def __aenter__(self):
         self.core_tools = await self.build_core_tools()
@@ -110,43 +117,48 @@ class CowakaClawAgent:
 
     async def run(self) -> None:
         await asyncio.gather(
-            self.agent_loop(),
+            self.dispatch_loop(),
+            self.announce_loop(),
             self.cron_manager.scheduler_loop(self.run_cron_job),
             self.ui.start(),
         )
 
-    async def agent_loop(self) -> None:
-        sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
-        session = Session.load(sessions_dir, self.ui.default_session_key)
+    async def dispatch_loop(self) -> None:
+        """ui.receive() を回し続け、メッセージをセッションごとのタスクに振り分ける。"""
         tools = await self.get_tools()
-        receive_task = asyncio.create_task(self.ui.receive())
         while True:
-            announce_queue_task = asyncio.create_task(self.announce_queue.get())
+            message = await self.ui.receive()
+            asyncio.create_task(self.handle_message(message, tools))
 
-            done, pending = await asyncio.wait(
-                [receive_task, announce_queue_task],
-                return_when=asyncio.FIRST_COMPLETED
-            )
+    async def announce_loop(self) -> None:
+        """cronジョブの完了通知を受け取り、対象チャンネルに送信する。"""
+        while True:
+            channel_id, msg = await self.announce_queue.get()
+            await self.ui.send(channel_id, f"\n[📢 {msg}]\n")
 
-            if announce_queue_task in done:
-                channel_id, msg = announce_queue_task.result()
-                await self.ui.send(channel_id, f"\n[📢 {msg}]\n")
-                # receive_taskはそのまま使い回す
-                continue
-            # ユーザー入力が来た
-            announce_queue_task.cancel()
-            try:
-                await announce_queue_task
-            except asyncio.CancelledError:
-                pass
-            message = receive_task.result()
+    async def handle_message(self, message: IncomingMessage, tools: list[dict]) -> None:
+        """1メッセージを処理する。セッション単位で直列実行を保証する。
+
+        同一セッションへの同時アクセスを防ぐためロックを使う。
+        ロックはWeakValueDictionaryで管理し、そのセッションを処理中・待機中の
+        タスクがなくなれば自動的にGCされる。
+
+        get〜setの間にawaitがないため、asyncio単一スレッド上でアトミックに実行され
+        複数タスクが同じキーに対して別々のロックを作ってしまうことはない。
+        """
+        lock = self.session_locks.get(message.session_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self.session_locks[message.session_key] = lock
+
+        async with lock:
+            sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
+            session = Session.load(sessions_dir, message.session_key)
             if message.content.strip() == "/new":
                 session.reset()
                 await self.ui.send(message.channel_id, "[session reset]")
-                receive_task = asyncio.create_task(self.ui.receive())
-                continue
+                return
             await self.assistant_turn(session, tools, message.content, message.channel_id)
-            receive_task = asyncio.create_task(self.ui.receive())
 
     async def run_cron_job(self, job_id: str, message: str, channel_id: str | None) -> None:
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
