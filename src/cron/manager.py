@@ -197,7 +197,7 @@ class CronJobManager:
             if job is None:
                 continue  # 待機中に削除された
 
-            asyncio.create_task(run_fn(next_job_id, job["message"], job.get("channel_id")))
+            asyncio.create_task(run_fn(next_job_id, job["message"], job["channel_id"]))
 
             if job["type"] == "at":
                 self.delete_cron_job(next_job_id)
