@@ -39,6 +39,8 @@ class MCPManager:
     ) -> AsyncGenerator["MCPManager", None]:
         with open(mcp_config_json_path) as f:
             config = json.load(f)
+        if "mcpServers" not in config:
+            raise ValueError(f"'mcpServers' key not found in {mcp_config_json_path}")
         async with MCPManager(configs=config["mcpServers"]) as mcp_manager:
             yield mcp_manager
 
