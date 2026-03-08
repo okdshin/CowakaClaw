@@ -159,7 +159,7 @@ class CowakaClawAgent:
                 sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
                 session = Session.load(sessions_dir, message.session_key)
                 if message.content.strip() == "/new":
-                    session.reset()
+                    await asyncio.to_thread(session.reset)
                     await self.ui.send(message.channel_id, "[session reset]")
                     return
                 await self.assistant_turn(session, tools, message.content, message.channel_id)
