@@ -93,12 +93,11 @@ class TestSendReceive:
 # ---------------------------------------------------------------------------
 
 
-def _make_request(messages=None, stream=False, user=None):
+def _make_request(messages=None, stream=False):
     return {
         "model": "gpt-4o",
         "messages": messages or [{"role": "user", "content": "hello"}],
         "stream": stream,
-        **({"user": user} if user else {}),
     }
 
 
@@ -152,26 +151,7 @@ class TestHTTPNonStreaming:
         assert received_msg.messages_override is not None
         assert len(received_msg.messages_override) == 3
 
-    async def test_user_field_determines_session_key(self):
-        ui = OpenAIAPIChatCompletions()
-        received_msg = None
-
-        async def fake_agent():
-            nonlocal received_msg
-            received_msg = await ui.receive()
-            await ui.send(received_msg.channel_id, "ok")
-
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=ui.app), base_url="http://test"
-        ) as client:
-            task = asyncio.create_task(fake_agent())
-            await client.post("/v1/chat/completions", json=_make_request(user="alice"))
-            await task
-
-        assert received_msg is not None
-        assert received_msg.session_key == "openai_api_chat_completions:user:alice"
-
-    async def test_no_user_field_generates_unique_session_key(self):
+    async def test_generates_unique_session_key_per_request(self):
         ui = OpenAIAPIChatCompletions()
         keys = []
 
@@ -191,6 +171,7 @@ class TestHTTPNonStreaming:
 
         assert len(keys) == 2
         assert keys[0] != keys[1]
+        assert all(k.startswith("openai_api_chat_completions:request:") for k in keys)
 
     async def test_empty_messages_returns_400(self):
         ui = OpenAIAPIChatCompletions()

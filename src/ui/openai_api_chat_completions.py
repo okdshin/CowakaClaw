@@ -28,10 +28,6 @@ class _ChatCompletionRequest(BaseModel):
     temperature: float | None = None
     max_tokens: int | None = None
     stream: bool = False
-    # userフィールドをセッションキーとして使用する。
-    # 同じuserからの同時リクエストはセッションロックでシリアライズされる。
-    # 未指定の場合はリクエスト単位で独立したセッションキーを生成する。
-    user: str | None = None
 
 
 class OpenAIAPIChatCompletions(UI):
@@ -76,12 +72,8 @@ class OpenAIAPIChatCompletions(UI):
                 for m in req.messages
             ]
 
-            # セッションキー: userフィールド優先、なければリクエスト単位
             request_id = uuid.uuid4().hex
-            if req.user:
-                session_key = f"openai_api_chat_completions:user:{req.user}"
-            else:
-                session_key = f"openai_api_chat_completions:request:{request_id}"
+            session_key = f"openai_api_chat_completions:request:{request_id}"
 
             if req.stream:
                 return await self._handle_streaming(
