@@ -62,6 +62,7 @@ class OpenAIAPIResponses(UI):
     """
 
     concurrent = True
+    supports_cron = False
     default_channel_id = "openai_api_responses"
 
     def __init__(self, host: str = "0.0.0.0", port: int = 8000, base_dir: str | Path = "./base_dir"):

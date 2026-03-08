@@ -37,6 +37,7 @@ class OpenAIAPIChatCompletions(UI):
     """
 
     concurrent = True
+    supports_cron = False
     default_channel_id = "openai_api_chat_completions"
 
     def __init__(self, host: str = "0.0.0.0", port: int = 8000):

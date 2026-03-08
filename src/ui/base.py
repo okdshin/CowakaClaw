@@ -18,6 +18,7 @@ class IncomingMessage:
 class UI(ABC):
     default_channel_id: str
     concurrent: bool = False  # Trueにすると複数メッセージを並列処理する
+    supports_cron: bool = True  # Falseにするとcronツールをエージェントに渡さない
 
     async def start(self) -> None:
         """エージェント起動時に呼ばれる。必要に応じてオーバーライドする。"""

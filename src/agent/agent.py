@@ -94,7 +94,10 @@ class CowakaClawAgent:
             return await asyncio.to_thread(call_memory_update, self.workspace_path, **args)
         register_tool("memory_update", MemoryUpdate, handle_memory_update)
 
-        # Cron
+        # Cron（supports_cron=False のUIでは登録しない）
+        if not self.ui.supports_cron:
+            return core_tools
+
         async def handle_cron_job_add_at(args: dict, channel_id: str) -> str:
             job_id = await self.cron_manager.add_cron_job(
                 "at", args["at"], args["message"], args["name"], args.get("channel_id") or channel_id
