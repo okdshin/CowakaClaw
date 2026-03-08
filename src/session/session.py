@@ -91,8 +91,8 @@ class Session:
         )
 
     async def append_message(self, message: dict) -> None:
-        self.messages.append(message)
         await asyncio.to_thread(self._write_message, message)
+        self.messages.append(message)
 
     def _write_message(self, message: dict) -> None:
         with open(self.session_jsonl_path, "a") as f:

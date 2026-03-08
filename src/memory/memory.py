@@ -29,7 +29,7 @@ def call_memory_update(
     workspace_path: Path,
     section: str,
     content: str,
-    mode: str = "append",
+    mode: Literal["append", "replace"] = "append",
 ) -> str:
     memory_path = workspace_path / "MEMORY.md"
     with memory_md_lock:

@@ -50,6 +50,7 @@ async def async_main(cli_args):
         workspace_path=cli_args.workspace,
         mcp_config_json_path=cli_args.mcp_config,
         ui=ui,
+        max_tool_iterations=cli_args.max_tool_iterations,
     ) as agent:
         await agent.run()
 
@@ -62,6 +63,8 @@ def main():
     parser.add_argument("--base-dir", default="./base_dir")
     parser.add_argument("--workspace", default="./workspace")
     parser.add_argument("--mcp-config", default="./mcp_config.json")
+    parser.add_argument("--max-tool-iterations", type=int, default=None,
+                        help="Maximum number of tool call iterations per turn (default: unlimited)")
 
     cli_args = parser.parse_args()
 

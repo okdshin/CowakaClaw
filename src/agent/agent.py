@@ -27,13 +27,20 @@ class Tool:
 
 class CowakaClawAgent:
     def __init__(
-        self, model, base_dir_path: str, workspace_path: str, mcp_config_json_path: str, ui: UI
+        self,
+        model,
+        base_dir_path: str,
+        workspace_path: str,
+        mcp_config_json_path: str,
+        ui: UI,
+        max_tool_iterations: int | None = None,
     ):
         self.model = model
         self.base_dir_path = Path(base_dir_path)
         self.workspace_path = Path(workspace_path)
         self.mcp_config_json_path = mcp_config_json_path
         self.ui = ui
+        self.max_tool_iterations = max_tool_iterations
 
         self.openai_client = openai.AsyncOpenAI()
         self.exit_stack = AsyncExitStack()
@@ -197,7 +204,12 @@ class CowakaClawAgent:
         await session.append_message(user_msg)
         await session.append_message(assistant_message)
         if tool_calls := assistant_message.get("tool_calls"):
+            iteration = 0
             while tool_calls:
+                if self.max_tool_iterations is not None and iteration >= self.max_tool_iterations:
+                    print(f"[warn] tool call iteration limit reached ({self.max_tool_iterations}), stopping")
+                    break
+                iteration += 1
                 for tool_call in tool_calls:
                     try:
                         tool_args = json.loads(tool_call["function"]["arguments"])

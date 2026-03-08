@@ -238,9 +238,10 @@ class CronJobManager:
                 continue
 
             next_time = min(job_next_times.values())
-            next_job_id = min(job_next_times, key=lambda k: job_next_times[k])
             wait_sec = max(0.0, (next_time - now).total_seconds())
-            print(f"[cron:{next_job_id}] next → {next_time.strftime('%Y-%m-%d %H:%M:%S')} ({wait_sec:.0f}s)")
+            for job_id, t in sorted(job_next_times.items(), key=lambda x: x[1]):
+                print(f"[cron:{job_id}] next → {t.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"[cron] waiting {wait_sec:.0f}s until next fire")
 
             try:
                 await asyncio.wait_for(self.wakeup.wait(), timeout=wait_sec)
