@@ -61,4 +61,7 @@ class MCPClient:
         for item in result.content:
             if hasattr(item, "text"):
                 texts.append(item.text)
-        return "\n".join(texts) if texts else "(no output)"
+        output = "\n".join(texts) if texts else "(no output)"
+        if result.isError:
+            return f"Error: {output}"
+        return output

@@ -88,7 +88,15 @@ class CronJobManager:
         with open(self.jobs_path, "w") as f:
             json.dump(jobs, f, indent=2, ensure_ascii=False)
 
-    def add_cron_job(
+    @staticmethod
+    def _normalize_at_schedule(when: str) -> str:
+        """相対時刻（'20m', '2h', '30s'）を絶対ISO日時文字列に変換する。
+        すでにISO日時文字列の場合はそのまま返す。"""
+        if when and when[-1] in ("m", "h", "s") and when[:-1].isdigit():
+            return (datetime.now().astimezone() + CronJobManager.parse_delta(when)).isoformat()
+        return when
+
+    def _add_cron_job_sync(
         self,
         job_type: Literal["at", "cron", "every"],
         when: str,
@@ -96,6 +104,9 @@ class CronJobManager:
         name: str,
         channel_id: str,
     ) -> str:
+        """ファイルI/Oのみ行う。wakeup.set() は呼ばない。"""
+        if job_type == "at":
+            when = self._normalize_at_schedule(when)
         job_id = str(uuid.uuid4())
         with self._jobs_lock:
             jobs = self.load_jobs()
@@ -108,17 +119,32 @@ class CronJobManager:
                 "created_at": datetime.now().astimezone().isoformat(),
             }
             self.save_jobs(jobs)
+        return job_id
+
+    async def add_cron_job(
+        self,
+        job_type: Literal["at", "cron", "every"],
+        when: str,
+        message: str,
+        name: str,
+        channel_id: str,
+    ) -> str:
+        job_id = await asyncio.to_thread(self._add_cron_job_sync, job_type, when, message, name, channel_id)
         self.wakeup.set()
         return job_id
 
-    def delete_cron_job(self, job_id: str) -> None:
-        """存在しない job_id を指定した場合は KeyError を送出する。"""
+    def _delete_cron_job_sync(self, job_id: str) -> None:
+        """ファイルI/Oのみ行う。wakeup.set() は呼ばない。"""
         with self._jobs_lock:
             jobs = self.load_jobs()
             if job_id not in jobs:
                 raise KeyError(f"Cron job not found: {job_id}")
             jobs.pop(job_id)
             self.save_jobs(jobs)
+
+    async def delete_cron_job(self, job_id: str) -> None:
+        """存在しない job_id を指定した場合は KeyError を送出する。"""
+        await asyncio.to_thread(self._delete_cron_job_sync, job_id)
         self.wakeup.set()
 
     def _delete_job_sync(self, job_id: str) -> None:
@@ -148,10 +174,8 @@ class CronJobManager:
         created_at = datetime.fromisoformat(job["created_at"])
 
         if job_type == "at":
-            if schedule[-1] in ("m", "h", "s") and schedule[:-1].isdigit():
-                return created_at + CronJobManager.parse_delta(schedule)
-            # プロセス再起動時に発火済み "at" ジョブが残っていた場合、
-            # 過去の時刻を返して即時再発火させることを意図している。
+            # schedule は常に絶対ISO日時文字列（登録時に _normalize_at_schedule で変換済み）。
+            # プロセス再起動時に未発火のジョブが残っていた場合、過去の時刻を返して即時再発火する。
             return datetime.fromisoformat(schedule).astimezone()
 
         if job_type == "cron":

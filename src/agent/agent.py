@@ -74,23 +74,23 @@ class CowakaClawAgent:
 
         # Cron
         async def handle_cron_job_add_at(args: dict, channel_id: str) -> str:
-            job_id = self.cron_manager.add_cron_job("at", args["at"], args["message"], args["name"], args.get("channel_id") or channel_id)
+            job_id = await self.cron_manager.add_cron_job("at", args["at"], args["message"], args["name"], args.get("channel_id") or channel_id)
             return f"Cron job created: job_id={job_id}"
         register_tool("cron_job_add_at", AddCronJobAt, handle_cron_job_add_at)
 
         async def handle_cron_job_add_cron(args: dict, channel_id: str) -> str:
-            job_id = self.cron_manager.add_cron_job("cron", args["cron_expr"], args["message"], args["name"], args.get("channel_id") or channel_id)
+            job_id = await self.cron_manager.add_cron_job("cron", args["cron_expr"], args["message"], args["name"], args.get("channel_id") or channel_id)
             return f"Cron job created: job_id={job_id}"
         register_tool("cron_job_add_cron", AddCronJobCron, handle_cron_job_add_cron)
 
         async def handle_cron_job_add_every(args: dict, channel_id: str) -> str:
-            job_id = self.cron_manager.add_cron_job("every", str(args["interval_sec"]), args["message"], args["name"], args.get("channel_id") or channel_id)
+            job_id = await self.cron_manager.add_cron_job("every", str(args["interval_sec"]), args["message"], args["name"], args.get("channel_id") or channel_id)
             return f"Cron job created: job_id={job_id}"
         register_tool("cron_job_add_every", AddCronJobEvery, handle_cron_job_add_every)
 
         async def handle_cron_job_delete(args: dict, channel_id: str) -> str:
             try:
-                self.cron_manager.delete_cron_job(args["job_id"])
+                await self.cron_manager.delete_cron_job(args["job_id"])
             except KeyError as e:
                 return f"Error: {e}"
             return f"Cron job deleted: job_id={args['job_id']}"
