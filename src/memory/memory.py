@@ -1,3 +1,4 @@
+import re
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -43,20 +44,25 @@ def call_memory_update(
         timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
         new_entry = f"{content}\n<!-- updated: {timestamp} -->"
 
-        if heading in current:
-            # セクションを見つけて処理
-            before, _, rest = current.partition(heading)
-            # 次のセクション（##）までを切り出す
-            parts = rest.split("\n## ", 1)
-            section_body = parts[0]
-            after = ("\n## " + parts[1]) if len(parts) > 1 else ""
-
+        # ^## で行頭のヘッダーのみマッチ。テキスト中に ## が埋め込まれていても誤マッチしない。
+        # DOTALL で . が改行にもマッチ、MULTILINE で ^ が各行頭にマッチ。
+        section_pattern = re.compile(
+            r"(?m)^## " + re.escape(section) + r"\n(.*?)(?=^## |\Z)",
+            re.DOTALL,
+        )
+        match = section_pattern.search(current)
+        if match:
+            section_body = match.group(1)
             if mode == "replace":
-                new_section = f"{heading}\n{new_entry}"
+                new_body = f"{new_entry}\n"
             else:  # append
-                new_section = f"{heading}{section_body}\n{new_entry}"
-
-            updated = before + new_section + after
+                new_body = section_body + f"{new_entry}\n"
+            updated = (
+                current[: match.start()]
+                + heading + "\n"
+                + new_body
+                + current[match.end() :]
+            )
         else:
             # セクションが存在しない → 末尾に追加
             updated = current.rstrip() + f"\n\n{heading}\n{new_entry}\n"
