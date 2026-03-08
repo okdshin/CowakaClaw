@@ -37,8 +37,11 @@ class MCPManager:
     async def load_from_config(
         cls, mcp_config_json_path: str
     ) -> AsyncGenerator["MCPManager", None]:
-        with open(mcp_config_json_path) as f:
-            config = json.load(f)
+        try:
+            with open(mcp_config_json_path) as f:
+                config = json.load(f)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"MCP config file not found: {mcp_config_json_path}")
         if "mcpServers" not in config:
             raise ValueError(f"'mcpServers' key not found in {mcp_config_json_path}")
         async with MCPManager(configs=config["mcpServers"]) as mcp_manager:

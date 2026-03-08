@@ -1,6 +1,7 @@
 import asyncio
 import datetime as dt
 import json
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -72,6 +73,9 @@ class CronJobManager:
         self.base_dir_path = base_dir_path
         self.jobs_path = base_dir_path / "cron" / "jobs.json"
         self.wakeup = asyncio.Event()
+        # jobs.json への read-modify-write をアトミックにするロック。
+        # add/delete/update は asyncio.to_thread 経由で複数スレッドから同時に呼ばれうるため。
+        self._jobs_lock = threading.Lock()
 
     def load_jobs(self) -> dict:
         if self.jobs_path.exists():
@@ -93,35 +97,44 @@ class CronJobManager:
         channel_id: str,
     ) -> str:
         job_id = str(uuid.uuid4())
-        jobs = self.load_jobs()
-        jobs[job_id] = {
-            "name": name,
-            "type": job_type,
-            "schedule": when,
-            "message": message,
-            "channel_id": channel_id,
-            "created_at": datetime.now().astimezone().isoformat(),
-        }
-        self.save_jobs(jobs)
+        with self._jobs_lock:
+            jobs = self.load_jobs()
+            jobs[job_id] = {
+                "name": name,
+                "type": job_type,
+                "schedule": when,
+                "message": message,
+                "channel_id": channel_id,
+                "created_at": datetime.now().astimezone().isoformat(),
+            }
+            self.save_jobs(jobs)
         self.wakeup.set()
         return job_id
 
     def delete_cron_job(self, job_id: str) -> None:
-        self._delete_job_sync(job_id)
+        """存在しない job_id を指定した場合は KeyError を送出する。"""
+        with self._jobs_lock:
+            jobs = self.load_jobs()
+            if job_id not in jobs:
+                raise KeyError(f"Cron job not found: {job_id}")
+            jobs.pop(job_id)
+            self.save_jobs(jobs)
         self.wakeup.set()
 
     def _delete_job_sync(self, job_id: str) -> None:
         """ファイルI/Oのみ行う。wakeup.set() は呼ばない（scheduler_loop内部から使用）。"""
-        jobs = self.load_jobs()
-        jobs.pop(job_id, None)
-        self.save_jobs(jobs)
+        with self._jobs_lock:
+            jobs = self.load_jobs()
+            jobs.pop(job_id, None)
+            self.save_jobs(jobs)
 
     def _update_last_run_sync(self, job_id: str) -> None:
         """ファイルI/Oのみ行う。wakeup.set() は呼ばない（scheduler_loop内部から使用）。"""
-        jobs = self.load_jobs()
-        if job_id in jobs:
-            jobs[job_id]["last_run_at"] = datetime.now().astimezone().isoformat()
-            self.save_jobs(jobs)
+        with self._jobs_lock:
+            jobs = self.load_jobs()
+            if job_id in jobs:
+                jobs[job_id]["last_run_at"] = datetime.now().astimezone().isoformat()
+                self.save_jobs(jobs)
 
     def list_jobs(self) -> list[dict]:
         jobs = self.load_jobs()

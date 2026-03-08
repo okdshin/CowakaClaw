@@ -89,7 +89,10 @@ class CowakaClawAgent:
         register_tool("cron_job_add_every", AddCronJobEvery, handle_cron_job_add_every)
 
         async def handle_cron_job_delete(args: dict, channel_id: str) -> str:
-            self.cron_manager.delete_cron_job(args["job_id"])
+            try:
+                self.cron_manager.delete_cron_job(args["job_id"])
+            except KeyError as e:
+                return f"Error: {e}"
             return f"Cron job deleted: job_id={args['job_id']}"
         register_tool("cron_job_delete", DeleteCronJob, handle_cron_job_delete)
 
