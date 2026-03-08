@@ -173,6 +173,12 @@ class CowakaClawAgent:
                 self.session_locks[message.session_key] = lock
 
             async with lock:
+                if message.messages_override is not None:
+                    # API UIからの場合: クライアントが全履歴を送ってくるのでそのまま使う。
+                    # セッションファイルへの永続化は行わない。
+                    await self.assistant_turn_stateless(message.messages_override, tools, message.channel_id)
+                    return
+
                 sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
                 session = await Session.load(sessions_dir, message.session_key)
                 if message.content.strip() == "/new":
@@ -237,3 +243,32 @@ class CowakaClawAgent:
                 tool_calls = assistant_message.get("tool_calls")
         await self.ui.send(channel_id, assistant_message.get("content") or "(no assistant message)")
         return assistant_message
+
+    async def assistant_turn_stateless(self, messages: list[dict], tools: list[dict], channel_id: str) -> None:
+        """セッション永続化なしでmessagesを直接LLMに渡して1ターン処理する。
+        API UIから呼ばれる。クライアントが全履歴を管理するため、サーバー側は保存しない。
+        """
+        assistant_message = await self.chat_completions(messages, tools)
+        current = list(messages) + [assistant_message]
+        iteration = 0
+        while tool_calls := assistant_message.get("tool_calls"):
+            if self.max_tool_iterations is not None and iteration >= self.max_tool_iterations:
+                print(f"[warn] tool call iteration limit reached ({self.max_tool_iterations}), stopping")
+                break
+            iteration += 1
+            for tool_call in tool_calls:
+                try:
+                    tool_args = json.loads(tool_call["function"]["arguments"])
+                    tool_response = await self.call_tool(tool_call["function"]["name"], tool_args, channel_id)
+                except json.JSONDecodeError:
+                    tool_response = "tool_call.function.arguments JSON parse error"
+                except Exception as e:
+                    tool_response = f"error: {type(e).__name__}: {e}"
+                current.append({
+                    "role": "tool",
+                    "content": tool_response,
+                    "tool_call_id": tool_call["id"],
+                })
+            assistant_message = await self.chat_completions(current, tools)
+            current.append(assistant_message)
+        await self.ui.send(channel_id, assistant_message.get("content") or "(no assistant message)")

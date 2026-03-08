@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -7,6 +7,9 @@ class IncomingMessage:
     content: str
     channel_id: str
     session_key: str
+    # API UIがリクエストのmessages全体を渡す場合に使用。
+    # セットされている場合、セッションファイルは使わずこれをLLMコンテキストとして直接使う。
+    messages_override: list[dict] | None = field(default=None)
 
 
 class UI(ABC):

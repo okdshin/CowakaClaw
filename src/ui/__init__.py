@@ -8,3 +8,9 @@ try:
     __all__.append("Slack")
 except ImportError:
     pass
+
+try:
+    from .openai_api_chat_completions import OpenAIAPIChatCompletions
+    __all__.append("OpenAIAPIChatCompletions")
+except ImportError:
+    pass
