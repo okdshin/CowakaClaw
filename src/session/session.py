@@ -111,7 +111,7 @@ class Session:
                 sessions = {}
             sessions[self.session_key] = {
                 "sessionId": self.session_id,
-                "updatedAt": datetime.now().isoformat(),
+                "updatedAt": datetime.now().astimezone().isoformat(),
             }
             with open(self.sessions_json_path, "w") as f:
                 json.dump(sessions, f, indent=2)

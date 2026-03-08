@@ -40,7 +40,7 @@ def call_memory_update(
             current = ""
 
         heading = f"## {section}"
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M")
         new_entry = f"{content}\n<!-- updated: {timestamp} -->"
 
         if heading in current:
