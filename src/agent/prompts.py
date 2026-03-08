@@ -1,4 +1,7 @@
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def build_agent_system_prompt(workspace_path: Path) -> str:
@@ -16,5 +19,5 @@ def build_agent_system_prompt(workspace_path: Path) -> str:
         if path.exists():
             bootstrap_prompts.append(path.read_text().strip())
         else:
-            print(f"[prompts] {md_filename}.md not found, skipping")
+            logger.warning("%s.md not found, skipping", md_filename)
     return "\n\n".join(bootstrap_prompts)

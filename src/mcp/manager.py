@@ -1,7 +1,10 @@
 import json
+import logging
 import os
 from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, asynccontextmanager
+
+logger = logging.getLogger(__name__)
 
 from .client import MCPClient
 
@@ -24,9 +27,9 @@ class MCPManager:
                     )
                 )
                 self.clients[server_name] = client
-                print(f"[MCP] connected: {server_name}")
+                logger.info("MCP connected: %s", server_name)
             except Exception as e:
-                print(f'[MCP] "{server_name}" connect error: {e}')
+                logger.error('MCP "%s" connect error: %s', server_name, e)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):

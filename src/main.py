@@ -1,5 +1,6 @@
 import asyncio
 import argparse
+import logging
 import os
 
 import openai
@@ -76,8 +77,17 @@ def main():
                         help="Maximum number of tool call iterations per turn (default: unlimited)")
     parser.add_argument("--llm-timeout-sec", type=float, default=None,
                         help="Timeout in seconds for each LLM API call (default: no timeout)")
+    parser.add_argument("--log-level", default="INFO",
+                        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+                        help="Log level (default: INFO)")
 
     cli_args = parser.parse_args()
+
+    logging.basicConfig(
+        level=getattr(logging, cli_args.log_level),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
     if cli_args.ui == "slack" and not cli_args.slack_channel:
         parser.error("--slack-channel is required when --ui slack")

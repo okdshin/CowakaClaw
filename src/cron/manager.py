@@ -1,11 +1,14 @@
 import asyncio
 import datetime as dt
 import json
+import logging
 import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
+
+logger = logging.getLogger(__name__)
 
 from croniter import croniter
 from pydantic import BaseModel, Field
@@ -228,7 +231,7 @@ class CronJobManager:
                 try:
                     t = self.next_run(job)
                 except Exception as e:
-                    print(f"[cron:{job_id}] next_run error: {e}, skipping")
+                    logger.error("cron:%s next_run error: %s, skipping", job_id, e)
                     continue
                 if t is None:
                     continue
@@ -243,8 +246,8 @@ class CronJobManager:
             next_time = min(job_next_times.values())
             wait_sec = max(0.0, (next_time - now).total_seconds())
             for job_id, t in sorted(job_next_times.items(), key=lambda x: x[1]):
-                print(f"[cron:{job_id}] next → {t.strftime('%Y-%m-%d %H:%M:%S')}")
-            print(f"[cron] waiting {wait_sec:.0f}s until next fire")
+                logger.debug("cron:%s next → %s", job_id, t.strftime("%Y-%m-%d %H:%M:%S"))
+            logger.debug("waiting %.0fs until next fire", wait_sec)
 
             try:
                 await asyncio.wait_for(self.wakeup.wait(), timeout=wait_sec)

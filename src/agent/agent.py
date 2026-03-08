@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import uuid
 import weakref
 from datetime import datetime
@@ -7,6 +8,8 @@ from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Awaitable, Callable
+
+logger = logging.getLogger(__name__)
 
 import openai
 from openai import pydantic_function_tool
@@ -226,7 +229,7 @@ class CowakaClawAgent:
             try:
                 await self.ui.send(channel_id, f"\n[📢 {msg}]\n")
             except Exception as e:
-                print(f"[announce] send error: {type(e).__name__}: {e}", flush=True)
+                logger.error("announce send error: %s: %s", type(e).__name__, e)
 
     async def handle_message(self, message: IncomingMessage, tools: list[dict]) -> None:
         """1メッセージを処理する。セッション単位で直列実行を保証する。
@@ -261,7 +264,7 @@ class CowakaClawAgent:
                     return
                 await self.assistant_turn(session, tools, message.content, message.channel_id, stream=message.stream)
         except Exception as e:
-            print(f"[error] {type(e).__name__}: {e}", flush=True)
+            logger.error("%s: %s", type(e).__name__, e)
             await self.ui.send(message.channel_id, f"[エラーが発生しました: {type(e).__name__}: {e}]")
 
     async def run_cron_job(self, job_id: str, message: str, channel_id: str) -> None:
@@ -272,7 +275,7 @@ class CowakaClawAgent:
             assistant_message = await self.assistant_turn(session, self.tools, message, channel_id)
             result = assistant_message.get('content') or '(no assistant message)'
         except Exception as e:
-            print(f"[cron:{job_id}] error: {type(e).__name__}: {e}", flush=True)
+            logger.error("cron:%s error: %s: %s", job_id, type(e).__name__, e)
             result = f"error: {type(e).__name__}: {e}"
         await self.announce_queue.put((channel_id, f"[cron:{job_id}] {result}"))
 
@@ -287,7 +290,7 @@ class CowakaClawAgent:
             iteration = 0
             while tool_calls:
                 if self.max_tool_iterations is not None and iteration >= self.max_tool_iterations:
-                    print(f"[warn] tool call iteration limit reached ({self.max_tool_iterations}), stopping")
+                    logger.warning("tool call iteration limit reached (%s), stopping", self.max_tool_iterations)
                     break
                 iteration += 1
                 for tool_call in tool_calls:
@@ -325,7 +328,7 @@ class CowakaClawAgent:
         iteration = 0
         while tool_calls := assistant_message.get("tool_calls"):
             if self.max_tool_iterations is not None and iteration >= self.max_tool_iterations:
-                print(f"[warn] tool call iteration limit reached ({self.max_tool_iterations}), stopping")
+                logger.warning("tool call iteration limit reached (%s), stopping", self.max_tool_iterations)
                 break
             iteration += 1
             for tool_call in tool_calls:
