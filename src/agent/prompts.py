@@ -12,7 +12,9 @@ def build_agent_system_prompt(workspace_path: Path) -> str:
     # Project context
     bootstrap_prompts = []
     for md_filename in ["SOUL", "MEMORY"]:
-        with open(workspace_path / f"{md_filename}.md") as mdf:
-            md = mdf.read().strip()
-            bootstrap_prompts.append(md)
+        path = workspace_path / f"{md_filename}.md"
+        if path.exists():
+            bootstrap_prompts.append(path.read_text().strip())
+        else:
+            print(f"[prompts] {md_filename}.md not found, skipping")
     return "\n\n".join(bootstrap_prompts)
