@@ -4,14 +4,15 @@ import json
 import logging
 import threading
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-logger = logging.getLogger(__name__)
-
 from croniter import croniter
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class AddCronJobAt(BaseModel):
@@ -29,7 +30,10 @@ class AddCronJobAt(BaseModel):
             "or relative duration like '30s', '20m', '2h', '7d'."
         ),
     )
-    channel_id: str | None = Field(None, description="Destination channel for the announcement. Defaults to the channel where this job was created.")
+    channel_id: str | None = Field(
+        None,
+        description="Destination channel for the announcement. Defaults to the channel where this job was created.",
+    )
 
 
 class AddCronJobCron(BaseModel):
@@ -44,7 +48,10 @@ class AddCronJobCron(BaseModel):
         ...,
         description="Cron expression (minute hour day month weekday), e.g. '0 9 * * 1-5'.",
     )
-    channel_id: str | None = Field(None, description="Destination channel for the announcement. Defaults to the channel where this job was created.")
+    channel_id: str | None = Field(
+        None,
+        description="Destination channel for the announcement. Defaults to the channel where this job was created.",
+    )
 
 
 class AddCronJobEvery(BaseModel):
@@ -60,7 +67,10 @@ class AddCronJobEvery(BaseModel):
         gt=0,
         description="Interval in seconds, e.g. 3600 for every hour.",
     )
-    channel_id: str | None = Field(None, description="Destination channel for the announcement. Defaults to the channel where this job was created.")
+    channel_id: str | None = Field(
+        None,
+        description="Destination channel for the announcement. Defaults to the channel where this job was created.",
+    )
 
 
 class DeleteCronJob(BaseModel):
@@ -216,7 +226,7 @@ class CronJobManager:
             raise ValueError(f"invalid unit {unit!r}: must be one of 's', 'm', 'h', 'd'")
         return mapping[unit]
 
-    async def scheduler_loop(self, run_fn) -> None:
+    async def scheduler_loop(self, run_fn: Callable[[str, str, str], Awaitable[None]]) -> None:
         while True:
             self.wakeup.clear()
             jobs = await asyncio.to_thread(self.load_jobs)

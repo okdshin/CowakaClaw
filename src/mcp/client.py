@@ -1,12 +1,14 @@
 from contextlib import AsyncExitStack
+from types import TracebackType
+
+from mcp.client.stdio import stdio_client
 
 import mcp
-from mcp.client.stdio import stdio_client
 
 
 class MCPClient:
     def __init__(
-        self, server_name, command: str, args: list[str], env: dict | None = None
+        self, server_name: str, command: str, args: list[str], env: dict[str, str] | None = None
     ):
         self.server_name = server_name
         self.command = command
@@ -30,7 +32,12 @@ class MCPClient:
         await self.session.initialize()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         await self.exit_stack.aclose()
 
     async def list_tools(self) -> list[dict]:

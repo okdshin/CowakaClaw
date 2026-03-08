@@ -3,7 +3,7 @@ import json
 import time
 import uuid
 
-from .base import IncomingMessage, UI
+from .base import UI, IncomingMessage
 
 try:
     import uvicorn

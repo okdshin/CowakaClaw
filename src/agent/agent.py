@@ -3,13 +3,12 @@ import json
 import logging
 import uuid
 import weakref
-from datetime import datetime
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+from types import TracebackType
 from typing import Awaitable, Callable
-
-logger = logging.getLogger(__name__)
 
 import openai
 from openai import pydantic_function_tool
@@ -18,20 +17,22 @@ from ..cron.manager import AddCronJobAt, AddCronJobCron, AddCronJobEvery, CronJo
 from ..mcp.manager import MCPManager
 from ..memory.memory import MemoryUpdate, call_memory_update
 from ..session.session import Session
-from ..ui.base import IncomingMessage, UI
+from ..ui.base import UI, IncomingMessage
 from .prompts import build_agent_system_prompt
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
 class Tool:
-    schema: str
-    handler: Callable
+    schema: dict
+    handler: Callable[[dict, str], Awaitable[str]]
 
 
 class CowakaClawAgent:
     def __init__(
         self,
-        model,
+        model: str,
         base_dir_path: str,
         workspace_path: str,
         mcp_config_json_path: str,
@@ -59,7 +60,7 @@ class CowakaClawAgent:
         # タスクのローカル変数が強参照を持つことで存続する。
         self.session_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "CowakaClawAgent":
         self.core_tools = await self.build_core_tools()
         self.mcp_manager = await self.exit_stack.enter_async_context(
             MCPManager.load_from_config(self.mcp_config_json_path)
@@ -67,13 +68,22 @@ class CowakaClawAgent:
         self.tools = await self.get_tools()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool | None:
         return await self.exit_stack.__aexit__(exc_type, exc_val, exc_tb)
 
     async def build_core_tools(self) -> dict[str, Tool]:
         core_tools: dict[str, Tool] = {}
 
-        def register_tool(name, pydantic_model, handler):
+        def register_tool(
+            name: str,
+            pydantic_model: type,
+            handler: Callable[[dict, str], Awaitable[str]],
+        ) -> None:
             core_tools[name] = Tool(
                 schema=pydantic_function_tool(pydantic_model, name=name),
                 handler=handler,
@@ -86,17 +96,23 @@ class CowakaClawAgent:
 
         # Cron
         async def handle_cron_job_add_at(args: dict, channel_id: str) -> str:
-            job_id = await self.cron_manager.add_cron_job("at", args["at"], args["message"], args["name"], args.get("channel_id") or channel_id)
+            job_id = await self.cron_manager.add_cron_job(
+                "at", args["at"], args["message"], args["name"], args.get("channel_id") or channel_id
+            )
             return f"Cron job created: job_id={job_id}"
         register_tool("cron_job_add_at", AddCronJobAt, handle_cron_job_add_at)
 
         async def handle_cron_job_add_cron(args: dict, channel_id: str) -> str:
-            job_id = await self.cron_manager.add_cron_job("cron", args["cron_expr"], args["message"], args["name"], args.get("channel_id") or channel_id)
+            job_id = await self.cron_manager.add_cron_job(
+                "cron", args["cron_expr"], args["message"], args["name"], args.get("channel_id") or channel_id
+            )
             return f"Cron job created: job_id={job_id}"
         register_tool("cron_job_add_cron", AddCronJobCron, handle_cron_job_add_cron)
 
         async def handle_cron_job_add_every(args: dict, channel_id: str) -> str:
-            job_id = await self.cron_manager.add_cron_job("every", str(args["interval_sec"]), args["message"], args["name"], args.get("channel_id") or channel_id)
+            job_id = await self.cron_manager.add_cron_job(
+                "every", str(args["interval_sec"]), args["message"], args["name"], args.get("channel_id") or channel_id
+            )
             return f"Cron job created: job_id={job_id}"
         register_tool("cron_job_add_every", AddCronJobEvery, handle_cron_job_add_every)
 
@@ -119,7 +135,7 @@ class CowakaClawAgent:
         else:
             return await self.mcp_manager.call_tool(tool_name, tool_args)
 
-    async def _chat_completions_non_stream(self, messages, tools) -> dict:
+    async def _chat_completions_non_stream(self, messages: list[dict], tools: list[dict]) -> dict:
         agent_system_prompt = build_agent_system_prompt(
             workspace_path=self.workspace_path
         )
@@ -279,7 +295,9 @@ class CowakaClawAgent:
             result = f"error: {type(e).__name__}: {e}"
         await self.announce_queue.put((channel_id, f"[cron:{job_id}] {result}"))
 
-    async def assistant_turn(self, session: Session, tools: list[dict], user_message: str, channel_id: str, stream: bool = False) -> dict:
+    async def assistant_turn(
+        self, session: Session, tools: list[dict], user_message: str, channel_id: str, stream: bool = False
+    ) -> dict:
         user_msg = {"role": "user", "content": user_message}
         # API呼び出しが成功してから永続化する。失敗時にセッションに
         # ユーザーメッセージだけが残って不整合になるのを防ぐ。
@@ -319,7 +337,9 @@ class CowakaClawAgent:
         await self.ui.send(channel_id, assistant_message.get("content") or "(no assistant message)")
         return assistant_message
 
-    async def assistant_turn_stateless(self, messages: list[dict], tools: list[dict], channel_id: str, stream: bool = False) -> None:
+    async def assistant_turn_stateless(
+        self, messages: list[dict], tools: list[dict], channel_id: str, stream: bool = False
+    ) -> None:
         """セッション永続化なしでmessagesを直接LLMに渡して1ターン処理する。
         API UIから呼ばれる。クライアントが全履歴を管理するため、サーバー側は保存しない。
         """

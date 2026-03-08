@@ -1,22 +1,22 @@
-from .base import IncomingMessage, UI
+from .base import UI, IncomingMessage
 from .cli import CLI
 
 __all__ = ["IncomingMessage", "UI", "CLI"]
 
 try:
-    from .slack import Slack
+    from .slack import Slack  # noqa: F401
     __all__.append("Slack")
 except ImportError:
     pass
 
 try:
-    from .openai_api_chat_completions import OpenAIAPIChatCompletions
+    from .openai_api_chat_completions import OpenAIAPIChatCompletions  # noqa: F401
     __all__.append("OpenAIAPIChatCompletions")
 except ImportError:
     pass
 
 try:
-    from .openai_api_responses import OpenAIAPIResponses
+    from .openai_api_responses import OpenAIAPIResponses  # noqa: F401
     __all__.append("OpenAIAPIResponses")
 except ImportError:
     pass

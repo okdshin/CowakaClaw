@@ -4,7 +4,7 @@ import time
 import uuid
 from pathlib import Path
 
-from .base import IncomingMessage, UI
+from .base import UI, IncomingMessage
 
 try:
     import uvicorn

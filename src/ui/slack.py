@@ -2,11 +2,11 @@ import asyncio
 import os
 import re
 
-from .base import IncomingMessage, UI
+from .base import UI, IncomingMessage
 
 try:
-    from slack_bolt.async_app import AsyncApp
     from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
+    from slack_bolt.async_app import AsyncApp
 except ImportError as e:
     raise ImportError("slack_bolt is required for Slack UI. Install it with: pip install slack-bolt") from e
 

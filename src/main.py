@@ -1,5 +1,5 @@
-import asyncio
 import argparse
+import asyncio
 import logging
 import os
 
@@ -32,7 +32,7 @@ async def select_model_interactively() -> str:
     raise ValueError(f"Unknown model: {choice!r}")
 
 
-async def async_main(cli_args):
+async def async_main(cli_args: argparse.Namespace) -> None:
     if cli_args.ui == "slack":
         from .ui import Slack
         ui = Slack(
@@ -65,7 +65,9 @@ async def async_main(cli_args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ui", choices=["cli", "slack", "openai_api_chat_completions", "openai_api_responses"], default="cli")
+    parser.add_argument(
+        "--ui", choices=["cli", "slack", "openai_api_chat_completions", "openai_api_responses"], default="cli"
+    )
     parser.add_argument("--slack-channel", help="Slack default channel ID (required for --ui slack)")
     parser.add_argument("--api-host", default="0.0.0.0", help="API server host (default: 0.0.0.0)")
     parser.add_argument("--api-port", type=int, default=8000, help="API server port (default: 8000)")

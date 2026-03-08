@@ -3,10 +3,11 @@ import logging
 import os
 from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, asynccontextmanager
-
-logger = logging.getLogger(__name__)
+from types import TracebackType
 
 from .client import MCPClient
+
+logger = logging.getLogger(__name__)
 
 
 class MCPManager:
@@ -15,7 +16,7 @@ class MCPManager:
         self.clients: dict[str, MCPClient] = {}  # server_name → MCPClient
         self.exit_stack = AsyncExitStack()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> "MCPManager":
         for server_name, server_config in self.configs.items():
             try:
                 client = await self.exit_stack.enter_async_context(
@@ -32,7 +33,12 @@ class MCPManager:
                 logger.error('MCP "%s" connect error: %s', server_name, e)
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> bool | None:
         return await self.exit_stack.__aexit__(exc_type, exc_val, exc_tb)
 
     @classmethod

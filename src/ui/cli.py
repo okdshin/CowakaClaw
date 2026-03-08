@@ -1,7 +1,7 @@
 import asyncio
 import sys
 
-from .base import IncomingMessage, UI
+from .base import UI, IncomingMessage
 
 
 async def read_stdin_line(prompt: str) -> str:
