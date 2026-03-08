@@ -55,5 +55,5 @@ class MCPManager:
         server_name, _ = tool_name.split("__", 1)
         client = self.clients.get(server_name)
         if not client:
-            return f"Error: unknown server '{tool_name}'"
+            return f"Error: unknown server '{server_name}'"
         return await client.call_tool(tool_name, tool_args)

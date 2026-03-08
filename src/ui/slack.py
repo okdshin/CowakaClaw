@@ -65,5 +65,8 @@ class Slack(UI):
         else:
             await self.app.client.chat_postMessage(channel=channel_id, text=text)
 
+    async def send_tool_result(self, channel_id: str, text: str) -> None:
+        """Slackではツール結果を送信しない（中間結果のノイズを避ける）"""
+
     async def start(self) -> None:
         await self.socket_handler.start_async()

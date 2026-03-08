@@ -165,6 +165,7 @@ class CowakaClawAgent:
                 await self.assistant_turn(session, tools, message.content, message.channel_id)
         except Exception as e:
             print(f"[error] {type(e).__name__}: {e}", flush=True)
+            await self.ui.send(message.channel_id, f"[エラーが発生しました: {type(e).__name__}: {e}]")
 
     async def run_cron_job(self, job_id: str, message: str, channel_id: str) -> None:
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
@@ -200,7 +201,7 @@ class CowakaClawAgent:
                             "tool_call_id": tool_call["id"],
                         },
                     )
-                    await self.ui.send(channel_id, tool_response)
+                    await self.ui.send_tool_result(channel_id, tool_response)
                 assistant_message = await self.chat_completions(
                     session.messages, tools
                 )

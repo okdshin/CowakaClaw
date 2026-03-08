@@ -23,3 +23,8 @@ class UI(ABC):
     @abstractmethod
     async def send(self, channel_id: str, text: str) -> None:
         """ユーザーにテキストを送る"""
+
+    async def send_tool_result(self, channel_id: str, text: str) -> None:
+        """ツール呼び出し結果を送る。デフォルトは send と同じ。
+        ノイズを抑えたいUIはオーバーライドして何もしないようにする。"""
+        await self.send(channel_id, text)

@@ -6,9 +6,18 @@ from pathlib import Path
 
 # sessions.json への read-modify-write をアトミックにするロック。
 # _update_sessions_json は asyncio.to_thread 経由で複数スレッドから同時に呼ばれるため
-# threading.Lock が必要。load も asyncio スレッドから sessions.json を読み書きするため
-# 同じロックで保護する。
-sessions_json_lock = threading.Lock()
+# threading.Lock が必要。ロックはパスごとに分けることで、異なるディレクトリの
+# Session インスタンスが互いをブロックしないようにする。
+_sessions_json_locks: dict[str, threading.Lock] = {}
+_sessions_json_locks_mutex = threading.Lock()
+
+
+def _get_sessions_json_lock(sessions_json_path: "Path") -> threading.Lock:
+    key = str(sessions_json_path)
+    with _sessions_json_locks_mutex:
+        if key not in _sessions_json_locks:
+            _sessions_json_locks[key] = threading.Lock()
+        return _sessions_json_locks[key]
 
 
 class Session:
@@ -31,7 +40,7 @@ class Session:
         sessions_dir.mkdir(parents=True, exist_ok=True)
         sessions_json_path = sessions_dir / "sessions.json"
 
-        with sessions_json_lock:
+        with _get_sessions_json_lock(sessions_json_path):
             # sessions.json を読む（なければ空dict）
             if sessions_json_path.exists():
                 with open(sessions_json_path) as f:
@@ -89,7 +98,7 @@ class Session:
         # keep old session jsonl files
 
     def _update_sessions_json(self) -> None:
-        with sessions_json_lock:
+        with _get_sessions_json_lock(self.sessions_json_path):
             if self.sessions_json_path.exists():
                 with open(self.sessions_json_path) as f:
                     sessions = json.load(f)
