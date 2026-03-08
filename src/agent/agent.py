@@ -6,7 +6,7 @@ from datetime import datetime
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Awaitable, Callable
 
 import openai
 from openai import pydantic_function_tool
@@ -114,7 +114,7 @@ class CowakaClawAgent:
         else:
             return await self.mcp_manager.call_tool(tool_name, tool_args)
 
-    async def chat_completions(self, messages, tools) -> dict:
+    async def _chat_completions_non_stream(self, messages, tools) -> dict:
         agent_system_prompt = build_agent_system_prompt(
             workspace_path=self.workspace_path
         )
@@ -129,6 +129,74 @@ class CowakaClawAgent:
         if hasattr(message, "model_dump"):
             return message.model_dump(exclude_none=True)
         return message
+
+    async def _chat_completions_stream(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        on_chunk: Callable[[str], Awaitable[None]],
+    ) -> dict:
+        """ストリーミングでLLMを呼び出す。テキストレスポンスの各チャンクを on_chunk に渡す。
+        ツールコールレスポンスの場合は on_chunk を呼ばずにそのままアセンブルして返す。
+        """
+        agent_system_prompt = build_agent_system_prompt(workspace_path=self.workspace_path)
+        stream = await self.openai_client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": "system", "content": agent_system_prompt}] + messages,
+            tools=tools or None,
+            stream=True,
+        )
+
+        content = ""
+        tool_calls: dict[int, dict] = {}  # index → 累積中のtool_call
+        is_tool_response = False
+
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+
+            if delta.content:
+                content += delta.content
+                if not is_tool_response:
+                    await on_chunk(delta.content)
+
+            if delta.tool_calls:
+                is_tool_response = True
+                for tc in delta.tool_calls:
+                    idx = tc.index
+                    if idx not in tool_calls:
+                        tool_calls[idx] = {
+                            "id": "",
+                            "type": "function",
+                            "function": {"name": "", "arguments": ""},
+                        }
+                    if tc.id:
+                        tool_calls[idx]["id"] = tc.id
+                    if tc.function:
+                        if tc.function.name:
+                            tool_calls[idx]["function"]["name"] += tc.function.name
+                        if tc.function.arguments:
+                            tool_calls[idx]["function"]["arguments"] += tc.function.arguments
+
+        msg: dict = {"role": "assistant"}
+        if content:
+            msg["content"] = content
+        if tool_calls:
+            msg["tool_calls"] = [tool_calls[i] for i in sorted(tool_calls.keys())]
+        return msg
+
+    async def _chat_completions(
+        self, messages: list[dict], tools: list[dict], channel_id: str, stream: bool
+    ) -> dict:
+        """stream フラグに応じて chat_completions / chat_completions_stream を呼び分ける。"""
+        if stream:
+            return await self._chat_completions_stream(
+                messages,
+                tools,
+                on_chunk=lambda c: self.ui.send_stream_chunk(channel_id, c),
+            )
+        return await self._chat_completions_non_stream(messages, tools)
 
     async def run(self) -> None:
         await asyncio.gather(
@@ -176,7 +244,9 @@ class CowakaClawAgent:
                 if message.messages_override is not None:
                     # API UIからの場合: クライアントが全履歴を送ってくるのでそのまま使う。
                     # セッションファイルへの永続化は行わない。
-                    await self.assistant_turn_stateless(message.messages_override, tools, message.channel_id)
+                    await self.assistant_turn_stateless(
+                        message.messages_override, tools, message.channel_id, stream=message.stream
+                    )
                     return
 
                 sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
@@ -185,7 +255,7 @@ class CowakaClawAgent:
                     await asyncio.to_thread(session.reset)
                     await self.ui.send(message.channel_id, "[session reset]")
                     return
-                await self.assistant_turn(session, tools, message.content, message.channel_id)
+                await self.assistant_turn(session, tools, message.content, message.channel_id, stream=message.stream)
         except Exception as e:
             print(f"[error] {type(e).__name__}: {e}", flush=True)
             await self.ui.send(message.channel_id, f"[エラーが発生しました: {type(e).__name__}: {e}]")
@@ -202,11 +272,11 @@ class CowakaClawAgent:
             result = f"error: {type(e).__name__}: {e}"
         await self.announce_queue.put((channel_id, f"[cron:{job_id}] {result}"))
 
-    async def assistant_turn(self, session: Session, tools: list[dict], user_message: str, channel_id: str) -> dict:
+    async def assistant_turn(self, session: Session, tools: list[dict], user_message: str, channel_id: str, stream: bool = False) -> dict:
         user_msg = {"role": "user", "content": user_message}
         # API呼び出しが成功してから永続化する。失敗時にセッションに
         # ユーザーメッセージだけが残って不整合になるのを防ぐ。
-        assistant_message = await self.chat_completions(session.messages + [user_msg], tools)
+        assistant_message = await self._chat_completions(session.messages + [user_msg], tools, channel_id, stream)
         await session.append_message(user_msg)
         await session.append_message(assistant_message)
         if tool_calls := assistant_message.get("tool_calls"):
@@ -236,19 +306,17 @@ class CowakaClawAgent:
                         },
                     )
                     await self.ui.send_tool_result(channel_id, tool_response)
-                assistant_message = await self.chat_completions(
-                    session.messages, tools
-                )
+                assistant_message = await self._chat_completions(session.messages, tools, channel_id, stream)
                 await session.append_message(assistant_message)
                 tool_calls = assistant_message.get("tool_calls")
         await self.ui.send(channel_id, assistant_message.get("content") or "(no assistant message)")
         return assistant_message
 
-    async def assistant_turn_stateless(self, messages: list[dict], tools: list[dict], channel_id: str) -> None:
+    async def assistant_turn_stateless(self, messages: list[dict], tools: list[dict], channel_id: str, stream: bool = False) -> None:
         """セッション永続化なしでmessagesを直接LLMに渡して1ターン処理する。
         API UIから呼ばれる。クライアントが全履歴を管理するため、サーバー側は保存しない。
         """
-        assistant_message = await self.chat_completions(messages, tools)
+        assistant_message = await self._chat_completions(messages, tools, channel_id, stream)
         current = list(messages) + [assistant_message]
         iteration = 0
         while tool_calls := assistant_message.get("tool_calls"):
@@ -269,6 +337,6 @@ class CowakaClawAgent:
                     "content": tool_response,
                     "tool_call_id": tool_call["id"],
                 })
-            assistant_message = await self.chat_completions(current, tools)
+            assistant_message = await self._chat_completions(current, tools, channel_id, stream)
             current.append(assistant_message)
         await self.ui.send(channel_id, assistant_message.get("content") or "(no assistant message)")

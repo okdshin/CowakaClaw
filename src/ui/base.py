@@ -10,6 +10,9 @@ class IncomingMessage:
     # API UIがリクエストのmessages全体を渡す場合に使用。
     # セットされている場合、セッションファイルは使わずこれをLLMコンテキストとして直接使う。
     messages_override: list[dict] | None = field(default=None)
+    # Trueの場合、エージェントはLLMをストリーミングモードで呼び出し
+    # send_stream_chunk でチャンクを順次送信する。
+    stream: bool = field(default=False)
 
 
 class UI(ABC):
@@ -25,7 +28,10 @@ class UI(ABC):
 
     @abstractmethod
     async def send(self, channel_id: str, text: str) -> None:
-        """ユーザーにテキストを送る"""
+        """ユーザーにテキストを送る。ストリーミング完了後も必ず呼ばれる。"""
+
+    async def send_stream_chunk(self, channel_id: str, chunk: str) -> None:
+        """ストリーミングのテキストチャンクを送る。デフォルトは何もしない。"""
 
     async def send_tool_result(self, channel_id: str, text: str) -> None:
         """ツール呼び出し結果を送る。デフォルトは send と同じ。

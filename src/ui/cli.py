@@ -31,6 +31,11 @@ async def read_stdin_line(prompt: str) -> str:
 class CLI(UI):
     default_channel_id = "local"
 
+    def __init__(self) -> None:
+        # チャンクが1つ以上送られたチャンネルを記録する。
+        # send() でストリーミング済みかどうかを判定するために使う。
+        self._streamed: set[str] = set()
+
     async def receive(self) -> IncomingMessage:
         try:
             line = await read_stdin_line("> ")
@@ -40,7 +45,18 @@ class CLI(UI):
             content=line,
             channel_id="local",
             session_key="agent:main:cli:dm:local",
+            stream=True,
         )
 
+    async def send_stream_chunk(self, channel_id: str, chunk: str) -> None:
+        self._streamed.add(channel_id)
+        sys.stdout.write(chunk)
+        sys.stdout.flush()
+
     async def send(self, channel_id: str, text: str) -> None:
-        print(text)
+        if channel_id in self._streamed:
+            # ストリーミング済み: チャンクはすでに出力されているので改行だけ入れる
+            self._streamed.discard(channel_id)
+            print()
+        else:
+            print(text)
