@@ -1,10 +1,12 @@
 import asyncio
 import json
+import uuid
 import weakref
+from datetime import datetime
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
-from dataclasses import dataclass
 
 import openai
 from openai import pydantic_function_tool
@@ -14,7 +16,7 @@ from ..mcp.manager import MCPManager
 from ..memory.memory import MemoryUpdate, call_memory_update
 from ..session.session import Session
 from ..ui.base import IncomingMessage, UI
-from ..utils import message_to_dict, timestamp
+from ..utils import message_to_dict
 from .prompts import build_agent_system_prompt
 
 
@@ -169,7 +171,8 @@ class CowakaClawAgent:
 
     async def run_cron_job(self, job_id: str, message: str, channel_id: str) -> None:
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
-        session = Session.load(sessions_dir, f"cron:{job_id}-{timestamp()}")
+        fired_at = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+        session = Session.load(sessions_dir, f"cron:{job_id}-{fired_at}-{uuid.uuid4().hex[:8]}")
         tools = await self.get_tools()
         try:
             assistant_message = await self.assistant_turn(session, tools, message, channel_id)

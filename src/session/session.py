@@ -1,6 +1,7 @@
 import asyncio
 import json
 import threading
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -18,6 +19,10 @@ def _get_sessions_json_lock(sessions_json_path: "Path") -> threading.Lock:
         if key not in _sessions_json_locks:
             _sessions_json_locks[key] = threading.Lock()
         return _sessions_json_locks[key]
+
+
+def _new_session_id() -> str:
+    return datetime.now().astimezone().strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8]
 
 
 class Session:
@@ -53,7 +58,7 @@ class Session:
             if entry is not None:
                 session_id = entry["sessionId"]
             else:
-                session_id = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+                session_id = _new_session_id()
                 sessions[session_key] = {
                     "sessionId": session_id,
                     "updatedAt": datetime.now().astimezone().isoformat(),
@@ -89,7 +94,7 @@ class Session:
         self._update_sessions_json()
 
     def reset(self) -> None:
-        self.session_id = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+        self.session_id = _new_session_id()
         self.session_jsonl_path = (
             self.session_jsonl_path.parent / f"{self.session_id}.jsonl"
         )
