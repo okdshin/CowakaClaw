@@ -148,9 +148,8 @@ class CowakaClawAgent:
         if response.choices[0].message.role != "assistant":
             raise RuntimeError(f"{response.choices[0].message.role=} != assistant")
         message = response.choices[0].message
-        if hasattr(message, "model_dump"):
-            return message.model_dump(exclude_none=True)
-        return message
+        assert hasattr(message, "model_dump")
+        return message.model_dump(exclude_none=True)
 
     async def _chat_completions_stream(
         self,

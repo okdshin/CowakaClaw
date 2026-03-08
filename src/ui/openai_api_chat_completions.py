@@ -95,7 +95,7 @@ class OpenAIAPIChatCompletions(UI):
     async def _handle_non_streaming(
         self, request_id: str, session_key: str, model: str, content: str, messages_dicts: list[dict]
     ):
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         future: asyncio.Future[str] = loop.create_future()
         self._pending[request_id] = future
 
