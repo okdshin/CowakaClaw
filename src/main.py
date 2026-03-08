@@ -40,6 +40,9 @@ async def async_main(cli_args):
     elif cli_args.ui == "openai_api_chat_completions":
         from .ui.openai_api_chat_completions import OpenAIAPIChatCompletions
         ui = OpenAIAPIChatCompletions(host=cli_args.api_host, port=cli_args.api_port)
+    elif cli_args.ui == "openai_api_responses":
+        from .ui.openai_api_responses import OpenAIAPIResponses
+        ui = OpenAIAPIResponses(host=cli_args.api_host, port=cli_args.api_port, base_dir=cli_args.base_dir)
     else:
         ui = CLI()
 
@@ -61,7 +64,7 @@ async def async_main(cli_args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--ui", choices=["cli", "slack", "openai_api_chat_completions"], default="cli")
+    parser.add_argument("--ui", choices=["cli", "slack", "openai_api_chat_completions", "openai_api_responses"], default="cli")
     parser.add_argument("--slack-channel", help="Slack default channel ID (required for --ui slack)")
     parser.add_argument("--api-host", default="0.0.0.0", help="API server host (default: 0.0.0.0)")
     parser.add_argument("--api-port", type=int, default=8000, help="API server port (default: 8000)")
