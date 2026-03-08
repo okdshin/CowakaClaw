@@ -31,8 +31,7 @@ class MCPClient:
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        if self.exit_stack:
-            await self.exit_stack.aclose()
+        await self.exit_stack.aclose()
 
     async def list_tools(self) -> list[dict]:
         result = await self.session.list_tools()
