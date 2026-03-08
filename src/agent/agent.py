@@ -184,8 +184,11 @@ class CowakaClawAgent:
         await self.announce_queue.put((channel_id, f"[cron:{job_id}] {result}"))
 
     async def assistant_turn(self, session: Session, tools: list[dict], user_message: str, channel_id: str) -> dict:
-        await session.append_message({"role": "user", "content": user_message})
-        assistant_message = await self.chat_completions(session.messages, tools)
+        user_msg = {"role": "user", "content": user_message}
+        # API呼び出しが成功してから永続化する。失敗時にセッションに
+        # ユーザーメッセージだけが残って不整合になるのを防ぐ。
+        assistant_message = await self.chat_completions(session.messages + [user_msg], tools)
+        await session.append_message(user_msg)
         await session.append_message(assistant_message)
         if tool_calls := assistant_message.get("tool_calls"):
             while tool_calls:

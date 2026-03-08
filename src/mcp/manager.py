@@ -52,7 +52,10 @@ class MCPManager:
         return all_tools
 
     async def call_tool(self, tool_name: str, tool_args: dict) -> str:
-        server_name, _ = tool_name.split("__", 1)
+        parts = tool_name.split("__", 1)
+        if len(parts) < 2:
+            return f"Error: invalid tool name '{tool_name}' (missing server prefix)"
+        server_name = parts[0]
         client = self.clients.get(server_name)
         if not client:
             return f"Error: unknown server '{server_name}'"
