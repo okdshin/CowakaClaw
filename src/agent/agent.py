@@ -34,6 +34,7 @@ class CowakaClawAgent:
         mcp_config_json_path: str,
         ui: UI,
         max_tool_iterations: int | None = None,
+        llm_timeout: float | None = None,
     ):
         self.model = model
         self.base_dir_path = Path(base_dir_path)
@@ -41,6 +42,7 @@ class CowakaClawAgent:
         self.mcp_config_json_path = mcp_config_json_path
         self.ui = ui
         self.max_tool_iterations = max_tool_iterations
+        self.llm_timeout = llm_timeout
 
         self.openai_client = openai.AsyncOpenAI()
         self.exit_stack = AsyncExitStack()
@@ -122,6 +124,7 @@ class CowakaClawAgent:
             model=self.model,
             messages=[{"role": "system", "content": agent_system_prompt}] + messages,
             tools=tools or None,
+            timeout=self.llm_timeout,
         )
         if response.choices[0].message.role != "assistant":
             raise RuntimeError(f"{response.choices[0].message.role=} != assistant")
@@ -145,6 +148,7 @@ class CowakaClawAgent:
             messages=[{"role": "system", "content": agent_system_prompt}] + messages,
             tools=tools or None,
             stream=True,
+            timeout=self.llm_timeout,
         )
 
         content = ""

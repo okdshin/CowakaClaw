@@ -54,6 +54,7 @@ async def async_main(cli_args):
         mcp_config_json_path=cli_args.mcp_config,
         ui=ui,
         max_tool_iterations=cli_args.max_tool_iterations,
+        llm_timeout=cli_args.llm_timeout_sec,
     ) as agent:
         await agent.run()
 
@@ -70,6 +71,8 @@ def main():
     parser.add_argument("--mcp-config", default="./mcp_config.json")
     parser.add_argument("--max-tool-iterations", type=int, default=None,
                         help="Maximum number of tool call iterations per turn (default: unlimited)")
+    parser.add_argument("--llm-timeout-sec", type=float, default=None,
+                        help="Timeout in seconds for each LLM API call (default: no timeout)")
 
     cli_args = parser.parse_args()
 
