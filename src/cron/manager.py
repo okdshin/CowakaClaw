@@ -179,9 +179,11 @@ class CronJobManager:
             jobs = await asyncio.to_thread(self.load_jobs)
             now = datetime.now().astimezone()
 
-            # 次に発火するジョブを探す
-            next_job_id = None
-            next_time = None
+            # 全ジョブの次回発火時刻を事前に計算して保持する。
+            # cron タイプは next_run() が「now より後の次回時刻」を返すため、
+            # タイムアウト後に再計算すると同時刻の別ジョブが「まだ先」と誤判定される。
+            # wait 前のスナップショットを使うことで複数ジョブの同時発火を正しく処理する。
+            job_next_times: dict[str, datetime] = {}
             for job_id, job in jobs.items():
                 try:
                     t = self.next_run(job)
@@ -192,14 +194,14 @@ class CronJobManager:
                     continue
                 if t.tzinfo is None:
                     t = t.astimezone()
-                if next_time is None or t < next_time:
-                    next_time = t
-                    next_job_id = job_id
+                job_next_times[job_id] = t
 
-            if next_job_id is None:
+            if not job_next_times:
                 await self.wakeup.wait()
                 continue
 
+            next_time = min(job_next_times.values())
+            next_job_id = min(job_next_times, key=lambda k: job_next_times[k])
             wait_sec = max(0.0, (next_time - now).total_seconds())
             print(f"[cron:{next_job_id}] next → {next_time.strftime('%Y-%m-%d %H:%M:%S')} ({wait_sec:.0f}s)")
 
@@ -209,15 +211,20 @@ class CronJobManager:
             except asyncio.TimeoutError:
                 pass
 
-            # 発火
-            job = (await asyncio.to_thread(self.load_jobs)).get(next_job_id)
-            if job is None:
-                continue  # 待機中に削除された
+            # 発火: next_time 以前に発火すべき全ジョブをまとめて処理する
+            now = datetime.now().astimezone()
+            current_jobs = await asyncio.to_thread(self.load_jobs)
+            for job_id, t in job_next_times.items():
+                if t > now:
+                    continue
+                job = current_jobs.get(job_id)
+                if job is None:
+                    continue  # 待機中に削除された
 
-            asyncio.create_task(run_fn(next_job_id, job["message"], job["channel_id"]))
+                asyncio.create_task(run_fn(job_id, job["message"], job["channel_id"]))
 
-            if job["type"] == "at":
-                # wakeup.set() は不要（scheduler_loop がすぐ次のイテレーションに進むため）
-                await asyncio.to_thread(self._delete_job_sync, next_job_id)
-            elif job["type"] == "every":
-                await asyncio.to_thread(self._update_last_run_sync, next_job_id)
+                if job["type"] == "at":
+                    # wakeup.set() は不要（scheduler_loop がすぐ次のイテレーションに進むため）
+                    await asyncio.to_thread(self._delete_job_sync, job_id)
+                elif job["type"] == "every":
+                    await asyncio.to_thread(self._update_last_run_sync, job_id)
