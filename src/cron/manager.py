@@ -23,7 +23,7 @@ class AddCronJobAt(BaseModel):
         ...,
         description=(
             "When to fire: ISO datetime string (e.g. '2026-03-01T09:00:00') "
-            "or relative duration like '20m', '2h', '30s'."
+            "or relative duration like '30s', '20m', '2h', '7d'."
         ),
     )
     channel_id: str | None = Field(None, description="Destination channel for the announcement. Defaults to the channel where this job was created.")
@@ -91,10 +91,12 @@ class CronJobManager:
     @staticmethod
     def _normalize_at_schedule(when: str) -> str:
         """相対時刻（'20m', '2h', '30s'）を絶対ISO日時文字列に変換する。
-        すでにISO日時文字列の場合はそのまま返す。"""
-        if when and when[-1] in ("m", "h", "s") and when[:-1].isdigit():
-            return (datetime.now().astimezone() + CronJobManager.parse_delta(when)).isoformat()
-        return when
+        parse_delta が解釈できない場合はISO日時文字列とみなしてそのまま返す。"""
+        try:
+            delta = CronJobManager.parse_delta(when)
+            return (datetime.now().astimezone() + delta).isoformat()
+        except ValueError:
+            return when
 
     def _add_cron_job_sync(
         self,
@@ -193,21 +195,22 @@ class CronJobManager:
 
     @staticmethod
     def parse_delta(s: str) -> dt.timedelta:
-        """'20m', '2h', '30s' → timedelta"""
+        """'20m', '2h', '30s', '7d' → timedelta"""
         if not s:
             raise ValueError("empty string is not valid")
         unit = s[-1]
         try:
             value = int(s[:-1])
         except ValueError:
-            raise ValueError(f"invalid duration {s!r}: expected format like '20m', '2h', '30s'")
+            raise ValueError(f"invalid duration {s!r}: expected format like '20m', '2h', '30s', '7d'")
         mapping = {
+            "s": dt.timedelta(seconds=value),
             "m": dt.timedelta(minutes=value),
             "h": dt.timedelta(hours=value),
-            "s": dt.timedelta(seconds=value),
+            "d": dt.timedelta(days=value),
         }
         if unit not in mapping:
-            raise ValueError(f"invalid unit {unit!r}: must be one of 'm', 'h', 's'")
+            raise ValueError(f"invalid unit {unit!r}: must be one of 's', 'm', 'h', 'd'")
         return mapping[unit]
 
     async def scheduler_loop(self, run_fn) -> None:
