@@ -41,7 +41,11 @@ class Session:
         self.sessions_json_path = sessions_json_path
 
     @classmethod
-    def load(cls, sessions_dir: Path, session_key: str) -> "Session":
+    async def load(cls, sessions_dir: Path, session_key: str) -> "Session":
+        return await asyncio.to_thread(cls._load_sync, sessions_dir, session_key)
+
+    @classmethod
+    def _load_sync(cls, sessions_dir: Path, session_key: str) -> "Session":
         sessions_dir.mkdir(parents=True, exist_ok=True)
         sessions_json_path = sessions_dir / "sessions.json"
 

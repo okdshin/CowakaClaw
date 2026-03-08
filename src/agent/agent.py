@@ -161,7 +161,7 @@ class CowakaClawAgent:
 
             async with lock:
                 sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
-                session = Session.load(sessions_dir, message.session_key)
+                session = await Session.load(sessions_dir, message.session_key)
                 if message.content.strip() == "/new":
                     await asyncio.to_thread(session.reset)
                     await self.ui.send(message.channel_id, "[session reset]")
@@ -174,7 +174,7 @@ class CowakaClawAgent:
     async def run_cron_job(self, job_id: str, message: str, channel_id: str) -> None:
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
         fired_at = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
-        session = Session.load(sessions_dir, f"cron:{job_id}-{fired_at}-{uuid.uuid4().hex[:8]}")
+        session = await Session.load(sessions_dir, f"cron:{job_id}-{fired_at}-{uuid.uuid4().hex[:8]}")
         try:
             assistant_message = await self.assistant_turn(session, self.tools, message, channel_id)
             result = assistant_message.get('content') or '(no assistant message)'
