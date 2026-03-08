@@ -11,6 +11,11 @@ dependencies = [
     "croniter>=2.0.0",
 ]
 
+[project.optional-dependencies]
+slack = ["slack-bolt"]
+api = ["fastapi", "uvicorn"]
+all = ["slack-bolt", "fastapi", "uvicorn"]
+
 [project.scripts]
 cowaka-claw = "src.main:main"
 
