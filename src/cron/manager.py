@@ -89,8 +89,8 @@ class CronJobManager:
         job_type: Literal["at", "cron", "every"],
         when: str,
         message: str,
-        name: str = "",
-        channel_id: str = "",
+        name: str,
+        channel_id: str,
     ) -> str:
         job_id = str(uuid.uuid4())
         jobs = self.load_jobs()
