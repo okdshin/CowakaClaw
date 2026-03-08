@@ -80,7 +80,7 @@ class Session:
         self._update_sessions_json()
 
     def reset(self) -> None:
-        self.session_id = datetime.now().strftime("%Y%m%d-%H%M%S")
+        self.session_id = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
         self.session_jsonl_path = (
             self.session_jsonl_path.parent / f"{self.session_id}.jsonl"
         )

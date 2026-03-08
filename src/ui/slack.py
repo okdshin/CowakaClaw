@@ -21,8 +21,14 @@ class Slack(UI):
     def __init__(self, default_channel_id: str):
         self.default_channel_id = default_channel_id
         self.queue: asyncio.Queue[IncomingMessage] = asyncio.Queue()
-        self.app = AsyncApp(token=os.environ["COWAKA_CLAW_SLACK_BOT_TOKEN"])
-        self.socket_handler = AsyncSocketModeHandler(self.app, os.environ["COWAKA_CLAW_SLACK_APP_TOKEN"])
+        bot_token = os.environ.get("COWAKA_CLAW_SLACK_BOT_TOKEN")
+        app_token = os.environ.get("COWAKA_CLAW_SLACK_APP_TOKEN")
+        if bot_token is None:
+            raise ValueError("COWAKA_CLAW_SLACK_BOT_TOKEN environment variable is not set")
+        if app_token is None:
+            raise ValueError("COWAKA_CLAW_SLACK_APP_TOKEN environment variable is not set")
+        self.app = AsyncApp(token=bot_token)
+        self.socket_handler = AsyncSocketModeHandler(self.app, app_token)
         self.register_handlers()
 
     def register_handlers(self) -> None:
