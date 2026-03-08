@@ -53,6 +53,7 @@ class CowakaClawAgent:
         self.mcp_manager = await self.exit_stack.enter_async_context(
             MCPManager.load_from_config(self.mcp_config_json_path)
         )
+        self.tools = await self.get_tools()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -127,13 +128,12 @@ class CowakaClawAgent:
 
     async def dispatch_loop(self) -> None:
         """ui.receive() を回し続け、メッセージをセッションごとのタスクに振り分ける。"""
-        tools = await self.get_tools()
         while True:
             message = await self.ui.receive()
             if self.ui.concurrent:
-                asyncio.create_task(self.handle_message(message, tools))
+                asyncio.create_task(self.handle_message(message, self.tools))
             else:
-                await self.handle_message(message, tools)
+                await self.handle_message(message, self.tools)
 
     async def announce_loop(self) -> None:
         """cronジョブの完了通知を受け取り、対象チャンネルに送信する。"""
@@ -173,9 +173,8 @@ class CowakaClawAgent:
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
         fired_at = datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
         session = Session.load(sessions_dir, f"cron:{job_id}-{fired_at}-{uuid.uuid4().hex[:8]}")
-        tools = await self.get_tools()
         try:
-            assistant_message = await self.assistant_turn(session, tools, message, channel_id)
+            assistant_message = await self.assistant_turn(session, self.tools, message, channel_id)
             result = assistant_message.get('content') or '(no assistant message)'
         except Exception as e:
             print(f"[cron:{job_id}] error: {type(e).__name__}: {e}", flush=True)
