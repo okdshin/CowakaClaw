@@ -11,7 +11,6 @@ async def async_main(cli_args):
         from .ui import Slack
         ui = Slack(
             default_channel_id=cli_args.slack_channel,
-            default_session_key=cli_args.slack_session or f"slack:thread:{cli_args.slack_channel}:default",
         )
     else:
         ui = CLI()
@@ -30,7 +29,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--ui", choices=["cli", "slack"], default="cli")
     parser.add_argument("--slack-channel", help="Slack default channel ID (required for --ui slack)")
-    parser.add_argument("--slack-session", help="Slack default session key (optional)")
     parser.add_argument("--model", default=None)
     parser.add_argument("--base-dir", default="./base_dir")
     parser.add_argument("--workspace", default="./workspace")

@@ -27,7 +27,6 @@ async def read_stdin_line(prompt: str) -> str:
 
 class CLI(UI):
     default_channel_id = "local"
-    default_session_key = "agent:main:cli:dm:local"
 
     async def receive(self) -> IncomingMessage:
         line = await read_stdin_line("> ")
