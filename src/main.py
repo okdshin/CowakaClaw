@@ -38,7 +38,7 @@ async def async_main(cli_args):
             default_channel_id=cli_args.slack_channel,
         )
     elif cli_args.ui == "openai_api_chat_completions":
-        from .ui import OpenAIAPIChatCompletions
+        from .ui.openai_api_chat_completions import OpenAIAPIChatCompletions
         ui = OpenAIAPIChatCompletions(host=cli_args.api_host, port=cli_args.api_port)
     else:
         ui = CLI()
