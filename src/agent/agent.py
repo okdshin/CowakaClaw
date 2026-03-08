@@ -171,10 +171,13 @@ class CowakaClawAgent:
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
         session = Session.load(sessions_dir, f"cron:{job_id}-{timestamp()}")
         tools = await self.get_tools()
-        assistant_message = await self.assistant_turn(session, tools, message, channel_id)
-        await self.announce_queue.put(
-            (channel_id, f"[cron:{job_id}] {assistant_message.get('content') or '(no assistant message)'}")
-        )
+        try:
+            assistant_message = await self.assistant_turn(session, tools, message, channel_id)
+            result = assistant_message.get('content') or '(no assistant message)'
+        except Exception as e:
+            print(f"[cron:{job_id}] error: {type(e).__name__}: {e}", flush=True)
+            result = f"error: {type(e).__name__}: {e}"
+        await self.announce_queue.put((channel_id, f"[cron:{job_id}] {result}"))
 
     async def assistant_turn(self, session: Session, tools: list[dict], user_message: str, channel_id: str) -> dict:
         await session.append_message({"role": "user", "content": user_message})
