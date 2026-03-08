@@ -146,19 +146,22 @@ class CowakaClawAgent:
         get〜setの間にawaitがないため、asyncio単一スレッド上でアトミックに実行され
         複数タスクが同じキーに対して別々のロックを作ってしまうことはない。
         """
-        lock = self.session_locks.get(message.session_key)
-        if lock is None:
-            lock = asyncio.Lock()
-            self.session_locks[message.session_key] = lock
+        try:
+            lock = self.session_locks.get(message.session_key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self.session_locks[message.session_key] = lock
 
-        async with lock:
-            sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
-            session = Session.load(sessions_dir, message.session_key)
-            if message.content.strip() == "/new":
-                session.reset()
-                await self.ui.send(message.channel_id, "[session reset]")
-                return
-            await self.assistant_turn(session, tools, message.content, message.channel_id)
+            async with lock:
+                sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
+                session = Session.load(sessions_dir, message.session_key)
+                if message.content.strip() == "/new":
+                    session.reset()
+                    await self.ui.send(message.channel_id, "[session reset]")
+                    return
+                await self.assistant_turn(session, tools, message.content, message.channel_id)
+        except Exception as e:
+            print(f"[error] {type(e).__name__}: {e}", flush=True)
 
     async def run_cron_job(self, job_id: str, message: str, channel_id: str | None) -> None:
         sessions_dir = self.base_dir_path / "agents" / "main" / "sessions"
