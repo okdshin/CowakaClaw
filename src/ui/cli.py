@@ -13,7 +13,10 @@ async def read_stdin_line(prompt: str) -> str:
         loop.remove_reader(sys.stdin.fileno())
         line = sys.stdin.readline()
         if not fut.done():
-            fut.set_result(line.rstrip("\n"))
+            if not line:  # EOF (Ctrl+D)
+                fut.set_exception(EOFError("stdin closed"))
+            else:
+                fut.set_result(line.rstrip("\n"))
 
     sys.stdout.write(prompt)
     sys.stdout.flush()
@@ -29,7 +32,10 @@ class CLI(UI):
     default_channel_id = "local"
 
     async def receive(self) -> IncomingMessage:
-        line = await read_stdin_line("> ")
+        try:
+            line = await read_stdin_line("> ")
+        except EOFError:
+            raise KeyboardInterrupt
         return IncomingMessage(
             content=line,
             channel_id="local",
