@@ -144,13 +144,21 @@ class CronJobManager:
     @staticmethod
     def parse_delta(s: str) -> dt.timedelta:
         """'20m', '2h', '30s' → timedelta"""
+        if not s:
+            raise ValueError("empty string is not valid")
         unit = s[-1]
-        value = int(s[:-1])
-        return {
+        try:
+            value = int(s[:-1])
+        except ValueError:
+            raise ValueError(f"invalid duration {s!r}: expected format like '20m', '2h', '30s'")
+        mapping = {
             "m": dt.timedelta(minutes=value),
             "h": dt.timedelta(hours=value),
             "s": dt.timedelta(seconds=value),
-        }[unit]
+        }
+        if unit not in mapping:
+            raise ValueError(f"invalid unit {unit!r}: must be one of 'm', 'h', 's'")
+        return mapping[unit]
 
     async def scheduler_loop(self, run_fn) -> None:
         while True:
