@@ -128,7 +128,10 @@ class CowakaClawAgent:
         tools = await self.get_tools()
         while True:
             message = await self.ui.receive()
-            asyncio.create_task(self.handle_message(message, tools))
+            if self.ui.concurrent:
+                asyncio.create_task(self.handle_message(message, tools))
+            else:
+                await self.handle_message(message, tools)
 
     async def announce_loop(self) -> None:
         """cronジョブの完了通知を受け取り、対象チャンネルに送信する。"""

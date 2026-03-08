@@ -16,6 +16,8 @@ def strip_mention(text: str) -> str:
 
 
 class Slack(UI):
+    concurrent = True
+
     def __init__(self, default_channel_id: str, default_session_key: str):
         self.default_channel_id = default_channel_id
         self.queue: asyncio.Queue[IncomingMessage] = asyncio.Queue()
