@@ -16,7 +16,6 @@ from ..mcp.manager import MCPManager
 from ..memory.memory import MemoryUpdate, call_memory_update
 from ..session.session import Session
 from ..ui.base import IncomingMessage, UI
-from ..utils import message_to_dict
 from .prompts import build_agent_system_prompt
 
 
@@ -116,7 +115,10 @@ class CowakaClawAgent:
         )
         if response.choices[0].message.role != "assistant":
             raise RuntimeError(f"{response.choices[0].message.role=} != assistant")
-        return message_to_dict(response.choices[0].message)
+        message = response.choices[0].message
+        if hasattr(message, "model_dump"):
+            return message.model_dump(exclude_none=True)
+        return message
 
     async def run(self) -> None:
         await asyncio.gather(
