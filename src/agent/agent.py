@@ -141,7 +141,10 @@ class CowakaClawAgent:
         """cronジョブの完了通知を受け取り、対象チャンネルに送信する。"""
         while True:
             channel_id, msg = await self.announce_queue.get()
-            await self.ui.send(channel_id, f"\n[📢 {msg}]\n")
+            try:
+                await self.ui.send(channel_id, f"\n[📢 {msg}]\n")
+            except Exception as e:
+                print(f"[announce] send error: {type(e).__name__}: {e}", flush=True)
 
     async def handle_message(self, message: IncomingMessage, tools: list[dict]) -> None:
         """1メッセージを処理する。セッション単位で直列実行を保証する。

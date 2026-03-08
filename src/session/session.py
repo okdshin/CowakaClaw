@@ -9,6 +9,8 @@ from pathlib import Path
 # _update_sessions_json は asyncio.to_thread 経由で複数スレッドから同時に呼ばれるため
 # threading.Lock が必要。ロックはパスごとに分けることで、異なるディレクトリの
 # Session インスタンスが互いをブロックしないようにする。
+# 注: エントリは削除されないため、sessions_json_path の種類数だけ増え続ける。
+# 現状は sessions_dir が少数に限定されている前提で許容している。
 _sessions_json_locks: dict[str, threading.Lock] = {}
 _sessions_json_locks_mutex = threading.Lock()
 

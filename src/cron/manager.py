@@ -107,10 +107,21 @@ class CronJobManager:
         return job_id
 
     def delete_cron_job(self, job_id: str) -> None:
+        self._delete_job_sync(job_id)
+        self.wakeup.set()
+
+    def _delete_job_sync(self, job_id: str) -> None:
+        """ファイルI/Oのみ行う。wakeup.set() は呼ばない（scheduler_loop内部から使用）。"""
         jobs = self.load_jobs()
         jobs.pop(job_id, None)
         self.save_jobs(jobs)
-        self.wakeup.set()
+
+    def _update_last_run_sync(self, job_id: str) -> None:
+        """ファイルI/Oのみ行う。wakeup.set() は呼ばない（scheduler_loop内部から使用）。"""
+        jobs = self.load_jobs()
+        if job_id in jobs:
+            jobs[job_id]["last_run_at"] = datetime.now().astimezone().isoformat()
+            self.save_jobs(jobs)
 
     def list_jobs(self) -> list[dict]:
         jobs = self.load_jobs()
@@ -126,6 +137,8 @@ class CronJobManager:
         if job_type == "at":
             if schedule[-1] in ("m", "h", "s") and schedule[:-1].isdigit():
                 return created_at + CronJobManager.parse_delta(schedule)
+            # プロセス再起動時に発火済み "at" ジョブが残っていた場合、
+            # 過去の時刻を返して即時再発火させることを意図している。
             return datetime.fromisoformat(schedule).astimezone()
 
         if job_type == "cron":
@@ -163,14 +176,18 @@ class CronJobManager:
     async def scheduler_loop(self, run_fn) -> None:
         while True:
             self.wakeup.clear()
-            jobs = self.load_jobs()
+            jobs = await asyncio.to_thread(self.load_jobs)
             now = datetime.now().astimezone()
 
             # 次に発火するジョブを探す
             next_job_id = None
             next_time = None
             for job_id, job in jobs.items():
-                t = self.next_run(job)
+                try:
+                    t = self.next_run(job)
+                except Exception as e:
+                    print(f"[cron:{job_id}] next_run error: {e}, skipping")
+                    continue
                 if t is None:
                     continue
                 if t.tzinfo is None:
@@ -193,16 +210,14 @@ class CronJobManager:
                 pass
 
             # 発火
-            job = self.load_jobs().get(next_job_id)
+            job = (await asyncio.to_thread(self.load_jobs)).get(next_job_id)
             if job is None:
                 continue  # 待機中に削除された
 
             asyncio.create_task(run_fn(next_job_id, job["message"], job["channel_id"]))
 
             if job["type"] == "at":
-                self.delete_cron_job(next_job_id)
+                # wakeup.set() は不要（scheduler_loop がすぐ次のイテレーションに進むため）
+                await asyncio.to_thread(self._delete_job_sync, next_job_id)
             elif job["type"] == "every":
-                jobs = self.load_jobs()
-                if next_job_id in jobs:
-                    jobs[next_job_id]["last_run_at"] = datetime.now().astimezone().isoformat()
-                    self.save_jobs(jobs)
+                await asyncio.to_thread(self._update_last_run_sync, next_job_id)
