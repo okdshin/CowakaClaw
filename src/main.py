@@ -14,7 +14,7 @@ async def select_model_interactively() -> str:
     response = await client.models.list()
     models = sorted(response.data, key=lambda m: m.id)
     if len(models) == 1:
-        print(f"Model auto-selected (only one available): {models[0].id}")
+        print(f"Model auto-selected (only one model is available): {models[0].id}")
         print("(Tip: set a default with --model <name> or COWAKA_CLAW_OPENAI_MODEL=<name>)")
         return models[0].id
     for i, model in enumerate(models):
