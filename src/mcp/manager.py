@@ -50,7 +50,10 @@ class MCPManager:
             with open(mcp_config_json_path) as f:
                 config = json.load(f)
         except FileNotFoundError:
-            raise FileNotFoundError(f"MCP config file not found: {mcp_config_json_path}")
+            logger.warning("MCP config file not found: %s (no MCP servers will be loaded)", mcp_config_json_path)
+            async with MCPManager(configs={}) as mcp_manager:
+                yield mcp_manager
+            return
         if "mcpServers" not in config:
             raise ValueError(f"'mcpServers' key not found in {mcp_config_json_path}")
         async with MCPManager(configs=config["mcpServers"]) as mcp_manager:
