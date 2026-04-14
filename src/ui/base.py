@@ -34,6 +34,9 @@ class UI(ABC):
     async def send_stream_chunk(self, channel_id: str, chunk: str) -> None:
         """ストリーミングのテキストチャンクを送る。デフォルトは何もしない。"""
 
+    async def send_tool_use(self, channel_id: str, tool_name: str, tool_args_json: str) -> None:
+        """Tool call about to be dispatched. Default: no-op."""
+
     async def send_tool_result(self, channel_id: str, text: str) -> None:
         """ツール呼び出し結果を送る。デフォルトは send と同じ。
         ノイズを抑えたいUIはオーバーライドして何もしないようにする。"""

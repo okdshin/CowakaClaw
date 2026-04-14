@@ -44,12 +44,22 @@ async def async_main(cli_args: argparse.Namespace) -> None:
     elif cli_args.ui == "openai_api_responses":
         from .ui.openai_api_responses import OpenAIAPIResponses
         ui = OpenAIAPIResponses(host=cli_args.api_host, port=cli_args.api_port, base_dir=cli_args.base_dir)
+    elif cli_args.ui == "textual":
+        from .ui.textual_ui import TextualUI
+        ui = TextualUI()
     else:
         ui = CLI()
 
-    model = cli_args.model or os.getenv("COWAKA_CLAW_OPENAI_MODEL")
-    if not model:
-        model = await select_model_interactively()
+    openai_client = None
+    if cli_args.mock:
+        from .llm.mock import MockAsyncOpenAI
+        openai_client = MockAsyncOpenAI(model="mock", stream_word_delay=cli_args.mock_stream_delay)
+        model = "mock"
+        logging.getLogger(__name__).info("Mock LLM mode enabled. No real API calls will be made.")
+    else:
+        model = cli_args.model or os.getenv("COWAKA_CLAW_OPENAI_MODEL")
+        if not model:
+            model = await select_model_interactively()
 
     async with CowakaClawAgent(
         model=model,
@@ -59,6 +69,7 @@ async def async_main(cli_args: argparse.Namespace) -> None:
         ui=ui,
         max_tool_iterations=cli_args.max_tool_iterations,
         llm_timeout=cli_args.llm_timeout_sec,
+        openai_client=openai_client,
     ) as agent:
         await agent.run()
 
@@ -66,7 +77,9 @@ async def async_main(cli_args: argparse.Namespace) -> None:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--ui", choices=["cli", "slack", "openai_api_chat_completions", "openai_api_responses"], default="cli"
+        "--ui",
+        choices=["cli", "slack", "openai_api_chat_completions", "openai_api_responses", "textual"],
+        default="cli",
     )
     parser.add_argument("--slack-channel", help="Slack default channel ID (required for --ui slack)")
     parser.add_argument("--api-host", default="0.0.0.0", help="API server host (default: 0.0.0.0)")
@@ -82,6 +95,10 @@ def main():
     parser.add_argument("--log-level", default="INFO",
                         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
                         help="Log level (default: INFO)")
+    parser.add_argument("--mock", action="store_true",
+                        help="Use mock LLM (no real API calls). Useful for UI development.")
+    parser.add_argument("--mock-stream-delay", type=float, default=0.05, metavar="SEC",
+                        help="Per-word delay in seconds for mock streaming (default: 0.05)")
 
     cli_args = parser.parse_args()
 

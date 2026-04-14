@@ -39,6 +39,7 @@ class CowakaClawAgent:
         ui: UI,
         max_tool_iterations: int | None = None,
         llm_timeout: float | None = None,
+        openai_client: openai.AsyncOpenAI | None = None,
     ):
         self.model = model
         self.base_dir_path = Path(base_dir_path)
@@ -48,7 +49,7 @@ class CowakaClawAgent:
         self.max_tool_iterations = max_tool_iterations
         self.llm_timeout = llm_timeout
 
-        self.openai_client = openai.AsyncOpenAI()
+        self.openai_client = openai_client if openai_client is not None else openai.AsyncOpenAI()
         self.exit_stack = AsyncExitStack()
         self.cron_manager = CronJobManager(self.base_dir_path)
 
@@ -314,6 +315,11 @@ class CowakaClawAgent:
                     break
                 iteration += 1
                 for tool_call in tool_calls:
+                    await self.ui.send_tool_use(
+                        channel_id,
+                        tool_call["function"]["name"],
+                        tool_call["function"]["arguments"],
+                    )
                     try:
                         tool_args = json.loads(tool_call["function"]["arguments"])
                         tool_response = await self.call_tool(
@@ -354,6 +360,11 @@ class CowakaClawAgent:
                 break
             iteration += 1
             for tool_call in tool_calls:
+                await self.ui.send_tool_use(
+                    channel_id,
+                    tool_call["function"]["name"],
+                    tool_call["function"]["arguments"],
+                )
                 try:
                     tool_args = json.loads(tool_call["function"]["arguments"])
                     tool_response = await self.call_tool(tool_call["function"]["name"], tool_args, channel_id)

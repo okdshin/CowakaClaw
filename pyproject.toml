@@ -14,7 +14,8 @@ dependencies = [
 [project.optional-dependencies]
 slack = ["slack-bolt", "aiohttp"]
 api = ["fastapi", "uvicorn"]
-all = ["cowaka-claw[slack,api]"]
+tui = ["textual>=0.80.0"]
+all = ["cowaka-claw[slack,api,tui]"]
 dev = ["ruff", "pytest", "pytest-asyncio"]
 
 [project.scripts]

@@ -20,3 +20,9 @@ try:
     __all__.append("OpenAIAPIResponses")
 except ImportError:
     pass
+
+try:
+    from .textual_ui import TextualUI  # noqa: F401
+    __all__.append("TextualUI")
+except ImportError:
+    pass
